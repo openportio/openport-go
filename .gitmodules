@@ -1,0 +1,3 @@
+[submodule "openport"]
+	path = openport
+	url = git@github.com:openportio/openport.git
