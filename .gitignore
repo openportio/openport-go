@@ -14,3 +14,7 @@ debian/package/
 mac/hash-mac.md5
 mac/packages/Openport.pkgproj.tmp
 mac/packages/build/
+debian/tmp
+dist
+build
+.idea
