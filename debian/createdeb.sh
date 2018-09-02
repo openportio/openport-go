@@ -32,18 +32,18 @@ function create_deb {
     cp -r ../../debian_$APPLICATION $PACKAGE/debian
 
     create_include_binaries
+    cd $PACKAGE
 
 
    # read -p "Press [Enter] key to continue..."
 
-    cd $PACKAGE
     echo "8" > debian/compat
     ls debian/
     DEB_BUILD_OPTIONS="noopt nostrip"
     pwd
     dch --create -v $(echo $VERSION)-1 --package $APPLICATION "TODO 12321"
     #debuild -S # For ppa
-    debuild -us -uc
+    dpkg-buildpackage -us -uc
 
     cd $start_dir
 
