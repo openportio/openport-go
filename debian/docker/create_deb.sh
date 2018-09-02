@@ -2,9 +2,7 @@
 set -ex
 cd $(dirname $0)/../..
 
-sudo -u docker ./create_exes.sh --no-gui
-./dist/openport/openport --list  # creates openport/alembic/versions/*.pyc files
-./dist/openport/openport --version
 bash -ex ./debian/createdeb.sh --no-gui
 dpkg -i ./debian/*.deb
-openport 22
+python -m SimpleHTTPServer 9000 &
+openport 9000

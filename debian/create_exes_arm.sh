@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #http://pythonhosted.org/PyInstaller/#building-the-bootloader
 
 PROJECTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"

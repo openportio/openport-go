@@ -1,4 +1,6 @@
 #!/bin/bash
+set -ex
+cd $(dirname $0)
 
 MACHINE=$(uname -m)
 DOCKERARGS=
