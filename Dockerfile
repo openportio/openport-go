@@ -24,6 +24,5 @@ libssl-dev \
 && rm -rf /var/lib/apt/lists/*
 RUN useradd docker
 COPY ./requirements.dist.txt /apps/distribution/
-COPY ./openport/setup.py /apps/distribution/openport/
 RUN pip install -r requirements.dist.txt
-
+RUN pip install git+https://github.com/openportio/openport

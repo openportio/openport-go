@@ -1,2 +1,2 @@
--e ./openport
 git+https://github.com/gholzmann/pyinstaller/@7be200b5a6f179f6753ca5a51713f19103f23393
+setuptools==19.2 # https://github.com/pyinstaller/pyinstaller/issues/2162

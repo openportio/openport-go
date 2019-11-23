@@ -3,18 +3,16 @@
 block_cipher = None
 
 import os
-os.chdir('openport')
 
-
-
-a = Analysis(['openport/apps/openport_app.py'],
+a = Analysis(['openport_dist/__main__.py'],
              pathex=['.'],
              hiddenimports=[
             'sqlalchemy.sql.default_comparator',
-            'packaging',
-            'packaging.version',
-            'packaging.specifiers',
-            'packaging.requirements',
+            #'packaging',
+            #'packaging.version',
+            #'packaging.specifiers',
+            #'packaging.requirements',
+            #'pip._vendor.appdirs',
             'cffi',
              ],
              hookspath=None,
@@ -29,11 +27,11 @@ from os import listdir
 from os.path import isfile, join
 import os
 
-migration_script_folder = 'openport/alembic/versions'
+migration_script_folder = '/apps/openport-client/openport/alembic/versions'
 for f in listdir(migration_script_folder):
     path = join(migration_script_folder, f)
     if isfile(path):
-        a.datas += [(path[9:], path, 'DATA')]
+        a.datas += [(path.split('/apps/openport-client/openport/')[1], path, 'DATA')]
 
 exe = EXE(pyz,
           a.scripts,
