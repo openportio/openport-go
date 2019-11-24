@@ -4,10 +4,13 @@ from unittest import TestCase
 
 
 def run_command(cmd):
-    output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT)
-    print(output)
-    return output
-
+    try:
+        output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT)
+        print(output)
+        return output
+    except subprocess.CalledProcessError as e:
+        print(e.output)
+        raise
 
 class VagrantTest(TestCase):
     @classmethod
