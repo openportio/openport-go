@@ -13,9 +13,8 @@ import (
 	"os/user"
 )
 
-
 type PortResponse struct {
-	Server_ip   string `json:"server_ip"`
+	Server_ip string `json:"server_ip"`
 	//	fallback_ssh_server_ip   string
 	//	fallback_ssh_server_port int
 	//	session_max_bytes        int64
@@ -28,7 +27,7 @@ type PortResponse struct {
 	//	http_forward_address     string
 	Server_port int `json:"server_port"`
 	//	key_id                   int
-	Error       string`json:"error"`
+	Error string `json:"error"`
 	//	fatal_error              bool
 }
 
@@ -38,7 +37,7 @@ func main() {
 
 	buf, err := ioutil.ReadFile(file)
 	if err != nil {
-		return
+		log.Fatal(err)
 	}
 
 	public_key, err := ioutil.ReadFile(file + ".pub")
@@ -52,22 +51,26 @@ func main() {
 	post_url := "https://openport.io/api/v1/request-port"
 	//post_url = "http://localhost:8000/internal/request-port"
 	resp, err := http.PostForm(post_url,
-		url.Values{"public_key": {string(public_key)}, "id": {"123"}})
+		url.Values{
+			"public_key":   {string(public_key)},
+			"request_port": {string("-1")},
+		})
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
+	fmt.Println(string(body))
+
 	if err != nil {
 		fmt.Println("http error")
 		log.Fatal(err)
 	}
 	fmt.Println(string(body))
-
+	fmt.Println("here1")
 	var jsonData = []byte(body)
 
 	response := PortResponse{}
-	var dat map[string]interface{}
 
 	json_err := json.Unmarshal(jsonData, &response)
 	if json_err != nil {
@@ -80,6 +83,7 @@ func main() {
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(key),
 		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
 	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", response.Server_ip, 22), config)
@@ -89,7 +93,7 @@ func main() {
 
 	log.Println("connected")
 
-	s := fmt.Sprintf("localhost:%d", response.Server_port)
+	s := fmt.Sprintf("0.0.0.0:%d", response.Server_port)
 
 	addr, err := net.ResolveTCPAddr("tcp", s)
 	if err != nil {
@@ -101,7 +105,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	log.Println("forwarding")
+	log.Printf("forwarding from %s \n", s)
 
 	defer listener.Close()
 	for {
@@ -115,7 +119,7 @@ func main() {
 			log.Println("new request")
 			conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", 8000))
 			if err != nil {
-				log.Fatal(err)
+				log.Println(err)
 			}
 
 			go func() {
@@ -132,4 +136,3 @@ func main() {
 		}(conn)
 	}
 }
-
