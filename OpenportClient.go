@@ -53,7 +53,8 @@ func main() {
 	resp, err := http.PostForm(post_url,
 		url.Values{
 			"public_key":   {string(public_key)},
-			"request_port": {string("-1")},
+			"request_port": {"-1"},
+			"client_version": {"1.2.0"},
 		})
 	if err != nil {
 		log.Fatal(err)
@@ -105,7 +106,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	log.Printf("forwarding from %s \n", s)
+	log.Printf("forwarding from http://openport.io:%d \n", response.Server_port)
 
 	defer listener.Close()
 	for {
