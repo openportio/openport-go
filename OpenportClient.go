@@ -14,7 +14,7 @@ import (
 )
 
 type PortResponse struct {
-	Server_ip string `json:"server_ip"`
+	ServerIP string `json:"server_ip"`
 	//	fallback_ssh_server_ip   string
 	//	fallback_ssh_server_port int
 	//	session_max_bytes        int64
@@ -25,7 +25,7 @@ type PortResponse struct {
 	//	session_token            string
 	//	session_id               int
 	//	http_forward_address     string
-	Server_port int `json:"server_port"`
+	ServerPort int `json:"server_port"`
 	//	key_id                   int
 	Error string `json:"error"`
 	//	fatal_error              bool
@@ -87,14 +87,14 @@ func main() {
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", response.Server_ip, 22), config)
+	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", response.ServerIP, 22), config)
 	if err != nil {
 		panic("Failed to dial: " + err.Error())
 	}
 
 	log.Println("connected")
 
-	s := fmt.Sprintf("0.0.0.0:%d", response.Server_port)
+	s := fmt.Sprintf("0.0.0.0:%d", response.ServerPort)
 
 	addr, err := net.ResolveTCPAddr("tcp", s)
 	if err != nil {
@@ -106,7 +106,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	log.Printf("forwarding from http://openport.io:%d \n", response.Server_port)
+	log.Printf("forwarding from http://openport.io:%d \n", response.ServerPort)
 
 	defer listener.Close()
 	for {
@@ -121,19 +121,16 @@ func main() {
 			conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", 8000))
 			if err != nil {
 				log.Println(err)
+			} else {
+				go func() {
+					defer c.Close()
+					defer conn.Close()
+					io.Copy(c, conn)
+				}()
+				go func() {
+					io.Copy(conn, c)
+				}()
 			}
-
-			go func() {
-				defer c.Close()
-				defer conn.Close()
-				io.Copy(c, conn)
-			}()
-			go func() {
-				defer c.Close()
-				defer conn.Close()
-				io.Copy(conn, c)
-			}()
-
 		}(conn)
 	}
 }
