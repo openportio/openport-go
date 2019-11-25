@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -ex
 
-pip install -e /apps/openport-client/
+#pip install -e /apps/openport-client/
 cd $(dirname $0)/../..
 
 sudo -u docker ./create_exes.sh --no-gui

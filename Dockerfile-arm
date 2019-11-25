@@ -1,9 +1,11 @@
-FROM jandebleser/openport-distribution
+FROM jandebleser/openport-distribution-tmp
+
 
 RUN cd / ; \
-    git clone https://github.com/pyinstaller/pyinstaller.git ; \
-    cd pyinstaller/bootloader ; \
-    git reset --hard 7be200b5a6f179f6753ca5a51713f19103f23393 ; \
-    python ./waf configure build install --no-lsb ; \
-    cd .. ; \
+    git clone https://github.com/pyinstaller/pyinstaller.git && \
+    cd pyinstaller/bootloader && \
+    git reset --hard 7be200b5a6f179f6753ca5a51713f19103f23393 && \
+    sed -i '/.*Werror.*/d' wscript && \
+    python ./waf configure build install --no-lsb && \
+    cd .. && \
     python setup.py install

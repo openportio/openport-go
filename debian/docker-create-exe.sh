@@ -7,4 +7,4 @@ cd $(dirname $0)
 docker run -it \
     -v $(pwd)/..:/apps/distribution/ \
     -v $(pwd)/../../openport-client:/apps/openport-client/ \
-    jandebleser/openport-distribution ./debian/docker/create_exe.sh
+    jandebleser/openport-distribution bash ./debian/docker/create_exe.sh

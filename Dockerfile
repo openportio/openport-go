@@ -1,4 +1,5 @@
-FROM python:2.7
+ARG FROMIMAGE=python:2.7
+FROM $FROMIMAGE
 WORKDIR /apps/distribution
 RUN apt-get update && apt-get install -y \
 sudo \
@@ -21,8 +22,10 @@ libsqlite3-dev \
 python-dev \
 libffi-dev \
 libssl-dev \
+git \
 && rm -rf /var/lib/apt/lists/*
 RUN useradd docker
+RUN pip install setuptools==19.2
 COPY ./requirements.dist.txt /apps/distribution/
 RUN pip install -r requirements.dist.txt
 RUN pip install git+https://github.com/openportio/openport
