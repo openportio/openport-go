@@ -1,4 +1,4 @@
-ARG FROMIMAGE=python:2.7
+ARG FROMIMAGE=python:2.7.17-stretch
 FROM $FROMIMAGE
 WORKDIR /apps/distribution
 RUN apt-get update && apt-get install -y \
