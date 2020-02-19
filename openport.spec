@@ -22,11 +22,11 @@ from os import listdir
 from os.path import isfile, join
 import os
 
-migration_script_folder = '/apps/openport-client/openport/alembic/versions'
+migration_script_folder = '../openport-client/openport/alembic/versions'
 for f in listdir(migration_script_folder):
     path = join(migration_script_folder, f)
     if isfile(path):
-        a.datas += [(path.split('/apps/openport-client/openport/')[1], path, 'DATA')]
+        a.datas += [(path.split('openport-client/openport/')[1], path, 'DATA')]
 
 exe = EXE(pyz,
           a.scripts,

@@ -6,7 +6,6 @@ cd $(dirname $0)
 rm -rf dist/*
 #deactivate || echo ''
 #source openport/env/bin/activate
-export LD_LIBRARY_PATH=/Python-2.7.9/
 pyinstaller --clean openport.spec -y
 
 no_gui=0

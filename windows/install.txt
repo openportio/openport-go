@@ -1,0 +1,9 @@
+https://download.visualstudio.microsoft.com/download/pr/9307e627-aaac-42cb-a32a-a39e166ee8cb/E59AE3E886BD4571A811FE31A47959AE5C40D87C583F786816C60440252CD7EC/VC_redist.x86.exe
+
+https://download.microsoft.com/download/7/9/6/796EF2E4-801B-4FC4-AB28-B59FBF6D907B/VCForPython27.msi
+https://www.python.org/ftp/python/2.7.17/python-2.7.17.amd64.msi
+https://download-cf.jetbrains.com/python/pycharm-professional-2019.3.3.exe
+https://netcologne.dl.sourceforge.net/project/nsis/NSIS%202/2.51/nsis-2.51-setup.exe
+https://github-production-release-asset-2e65be.s3.amazonaws.com/23216272/d9f3ae80-3654-11ea-91a8-aa26071355ee?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIWNJYAX4CSVEH53A%2F20200219%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20200219T183616Z&X-Amz-Expires=300&X-Amz-Signature=df7d9e2b63fa8b9ec094dcc059bc7ef73bd4340104e797edbb1944687614659d&X-Amz-SignedHeaders=host&actor_id=0&response-content-disposition=attachment%3B%20filename%3DGit-2.25.0-64-bit.exe&response-content-type=application%2Foctet-stream
+https://go.microsoft.com/fwlink/?LinkID=698771
+http://download.microsoft.com/download/2/1/2/2122BA8F-7EA6-4784-9195-A8CFB7E7388E/StandaloneSDK/sdksetup.exe

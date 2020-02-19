@@ -65,13 +65,14 @@ BrandingText "http://www.openport.io/"
 
 Section # hidden section
 	setOutPath $INSTDIR
-;	file /r ..\..\client\dist\*.* 
-	file /r ..\..\client\dist\openport\*.* 
-	file /r ..\..\client\dist\openportw\*.* 
-	file /r ..\..\client\dist\openport-gui\*.*
-	file ..\..\client\resources\logo-base.ico
-;	file ..\..\client\resources\install_windows_service.bat
-;	file ..\..\client\resources\server.pem
+;	file /r ..\dist\*.* 
+	file /r ..\dist\openport\*.* 
+	file /r ..\dist\openportw\*.* 
+;	file /r ..\dist\openport-gui\*.*
+	file ..\..\openport-client\openport\resources\logo-base.ico
+;	file ..\..\openport-client\openport\resources\install_windows_service.bat
+;	file ..\..\openport-client\openport\resources\server.pem
+    file msvcr90.dll
 	#messageBox MB_OK "instdir: $INSTDIR"
 ;	WriteRegStr HKCR "*\shell\${APPNAME}\command" "" "$INSTDIR\${OPENPORT_EXE} $\"%1$\""
 ;	WriteRegStr HKCR "Directory\shell\${APPNAME}\command" "" "$INSTDIR\${OPENPORT_EXE} $\"%1$\""
@@ -79,7 +80,7 @@ Section # hidden section
 	; Write uninstaller to add/remove programs.
 	WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayName" "${APPNAME}"
 	WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayIcon" "$INSTDIR\logo-base.ico"
-	WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "Publisher" "Danger Software"
+	WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "Publisher" "iTech"
 	WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "UninstallString" "$INSTDIR\Uninstall.exe"
 	WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "InstallLocation" "$INSTDIR"
 	
@@ -87,7 +88,7 @@ Section # hidden section
 	
 	
 ;	# Start Menu
-	createShortCut "$SMPROGRAMS\${APPNAME}.lnk" "$INSTDIR\openport-gui.exe" "" "$INSTDIR\logo-base.ico"
+;	createShortCut "$SMPROGRAMS\${APPNAME}.lnk" "$INSTDIR\openport-gui.exe" "" "$INSTDIR\logo-base.ico"
 
 	${EnvVarUpdate} $0 "PATH" "A" "HKLM" "$INSTDIR"
 SectionEnd
