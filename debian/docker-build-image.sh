@@ -5,7 +5,7 @@ cd $(dirname $0)
 MACHINE=$(uname -m)
 DOCKERARGS=
 if [ "$MACHINE" == "armv7l" ] ; then
-	DOCKERARGS="--build-arg FROMIMAGE=resin/rpi-raspbian:jessie"
+	DOCKERARGS="--build-arg FROMIMAGE=arm32v7/python:3.6.10-stretch"
 	EXTRATAG="-tmp"
 fi
 export DOCKER_API_VERSION=1.23

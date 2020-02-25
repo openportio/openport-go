@@ -1,3 +1,4 @@
-setuptools==19.2 # https://github.com/pyinstaller/pyinstaller/issues/2162
-git+https://github.com/gholzmann/pyinstaller/@7be200b5a6f179f6753ca5a51713f19103f23393
-../openport-client/
+setuptools==45.2.0
+pyinstaller==3.6
+
+#../openport-client/

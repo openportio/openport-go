@@ -1,7 +1,6 @@
 #!/bin/sh
 source local_settings.sh
 
-cd ../..
 bash -ex ./create_exes_mac.sh
 
 

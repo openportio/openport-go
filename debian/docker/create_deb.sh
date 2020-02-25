@@ -4,5 +4,5 @@ cd $(dirname $0)/../..
 
 bash -ex ./debian/createdeb.sh --no-gui
 dpkg -i ./debian/*.deb
-python -m SimpleHTTPServer 9000 &
+python -m http.server 9000 &
 openport 9000

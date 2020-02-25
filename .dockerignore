@@ -1,0 +1,9 @@
+build/
+dist/
+deploy/
+mac/
+openport_dist/
+debian/tmp/
+debian/*.deb
+tmp/
+openport*.deb

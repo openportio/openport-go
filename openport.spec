@@ -3,12 +3,14 @@
 block_cipher = None
 
 import os
+import sys
 
 a = Analysis(['openport_dist/__main__.py'],
              pathex=['.'],
              hiddenimports=[
             'sqlalchemy.sql.default_comparator',
             'cffi',
+            'pkg_resources.py2_warn',
              ],
              hookspath=None,
              runtime_hooks=None,

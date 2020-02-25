@@ -3,7 +3,8 @@ set -ex
 export DEBFULLNAME="Jan De Bleser"
 export DEBEMAIL="jan@openport.io"
 cd $(dirname $0)
-VERSION=$(python -m openport --version  2>&1 )
+
+VERSION=$(../dist/openport/openport --version 2>&1 )
 echo $VERSION
 
 #sudo apt-get --yes install build-essential autoconf automake autotools-dev dh-make debhelper devscripts fakeroot xutils lintian pbuilder python-dev python-pip python-virtualenv libsqlite3-dev
@@ -22,6 +23,8 @@ function create_deb {
     rm -rf tmp/
     mkdir -p tmp/$PACKAGE/usr/lib/$APPLICATION
     cp ../dist/$APPLICATION/* tmp/$PACKAGE/usr/lib/$APPLICATION -r
+    mkdir -p tmp/$PACKAGE/usr/bin
+    cp openport.sh tmp/$PACKAGE/usr/bin/openport
 
     cd tmp
     mkdir -p package
@@ -37,7 +40,7 @@ function create_deb {
 
    # read -p "Press [Enter] key to continue..."
 
-    echo "8" > debian/compat
+    echo "9" > debian/compat
     ls debian/
     DEB_BUILD_OPTIONS="noopt nostrip"
     pwd

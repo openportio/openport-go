@@ -6,8 +6,9 @@ git pull
 
 start_dir=$(pwd)
 
-cd ../../client
-env/bin/pip install -r requirements.pip -r requirements.gui.txt
+cd ../openport
+virtualenv env
+env/bin/pip install -e .
 
 cd $start_dir
 
