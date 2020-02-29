@@ -25,4 +25,4 @@ git \
 RUN useradd docker
 COPY ./requirements.dist.txt /apps/distribution/
 RUN pip install -r requirements.dist.txt
-#RUN pip install git+https://github.com/openportio/openport
+RUN pip install 'git+https://github.com/openportio/openport@python3'
