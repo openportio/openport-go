@@ -4,4 +4,5 @@ create-deb-full:
 	./debian/docker-create-deb.sh
 
 docker-deb-bash:
-	docker run -it jandebleser/openport-distribution bash
+	docker run -it -v $$(pwd):/apps/distribution/ jandebleser/openport-distribution bash
+
