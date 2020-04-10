@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -ex
-cd $(dirname $0)
+cd "$(dirname "$0")"
 
-docker build . -t sshserver
-docker run -it -v $(pwd):/apps/sshserver sshserver go build OpenportClient.go
-docker run -it -v $(pwd):/apps/sshserver sshserver ./OpenportClient 22
+docker build . -t openport-client
+docker run -it openport-client ./openport 22

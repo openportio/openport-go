@@ -1,20 +1,24 @@
-FROM ubuntu:16.04
+FROM ubuntu:18.04
 MAINTAINER JanDeBleser
 
 ENV LANG C.UTF-8
 
-RUN apt-get update; apt-get install -y software-properties-common python-software-properties
-RUN add-apt-repository ppa:gophers/archive
+RUN apt-get update; apt-get install -y software-properties-common
+RUN add-apt-repository ppa:longsleep/golang-backports
 RUN apt-get update
-RUN apt-get install -y golang-1.10-go git
-RUN mkdir /root/.openport/
-RUN ssh-keygen -q -t rsa -N '' -f /root/.openport/id_rsa
+RUN apt-get install -y golang-1.14-go
 
-WORKDIR /apps/sshserver
+WORKDIR /apps/go/
 
-ENV PATH=$PATH:/usr/lib/go-1.10/bin
-ENV GOPATH=/apps/
+ENV PATH=$PATH:/usr/lib/go-1.14/bin
 ENV GOBIN=$GOPATH/bin
 RUN go version
-ADD OpenportClient.go /apps/sshserver/
-RUN go get
+
+COPY go.mod \
+    go.sum \
+    /apps/go/
+RUN go mod download
+
+COPY . /apps/go/
+
+RUN go build -o openport cmd/openport/main.go
