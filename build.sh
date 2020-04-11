@@ -1,7 +1,9 @@
 #!/bin/bash
-cd "$(dirname "$1")"
 set -ex
+cd "$(dirname "$0")"
 export PATH=$PATH:/usr/local/go/bin
 export HOME
 
-go build -v -o openport cmd/openport/main.go
+go build -v -o openport main.go
+
+./openport help
