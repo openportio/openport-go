@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/user"
 	"runtime"
 	"strconv"
@@ -83,6 +84,10 @@ func main() {
 	killFlagSet.StringVar(&dbPath, "database", "~/.openport/openport.db", "Database file") //databaseFlag :=
 	killFlagSet.Bool("verbose", false, "Verbose logging")                                  // verbose :=
 
+	restartSharesFlagSet := flag.NewFlagSet("restart-shares", flag.ExitOnError)
+	restartSharesFlagSet.StringVar(&dbPath, "database", "~/.openport/openport.db", "Database file") //databaseFlag :=
+	restartSharesFlagSet.Bool("verbose", false, "Verbose logging")
+
 	flag.Usage = myUsage
 
 	if len(os.Args) == 1 {
@@ -127,6 +132,10 @@ func main() {
 			log.Fatalf("Could not kill session: %s", err3)
 		}
 		println(resp)
+	case "restart-shares":
+		restartSharesFlagSet.Parse(os.Args[2:])
+		restartShares()
+		os.Exit(0)
 	default:
 		defaultFlagSet.Parse(os.Args[1:])
 		tail := defaultFlagSet.Args()
@@ -189,6 +198,22 @@ func main() {
 	   parser.add_argument('--daemonize', '-d', action='store_true', help='Start the app in the background.')
 	   parser.add_argument('--proxy', type=str, help='Socks5 proxy to use. Format: socks5h://user:pass@host:port')
 	*/
+}
+
+func restartShares() {
+	sessions, err := getAllActive()
+	if err != nil {
+		panic(err)
+	}
+	for _, session := range sessions {
+		if session.RestartCommand != "" {
+			cmd := exec.Command(os.Args[0], strings.Split(session.RestartCommand, " ")...)
+			err = cmd.Start()
+			if err != nil {
+				logrus.Warn(err)
+			}
+		}
+	}
 }
 
 func stopSession(w http.ResponseWriter, r *http.Request) {
@@ -326,9 +351,9 @@ func forwardPort(session Session) {
 		log.Fatal(err.Error())
 	}
 	defer listener.Close()
-	if session.HttpForward{
+	if session.HttpForward {
 		log.Printf("Now forwarding remote address %s to localhost", session.HttpForwardAddress)
-	} else{
+	} else {
 		log.Printf("Now forwarding remote port %s:%d to localhost:%d", response.ServerIP, response.ServerPort, port)
 	}
 	log.Printf(response.Message)
@@ -435,4 +460,16 @@ func save(session Session) error {
 	}
 	db.Save(&session)
 	return db.Error
+}
+
+func getAllActive() ([]Session, error) {
+	db, err := gorm.Open("sqlite3", dbPath)
+	if err != nil {
+		panic("failed to connect database")
+	}
+	defer db.Close()
+
+	var sessions []Session
+	db.Where("active = 1").Find(&sessions)
+	return sessions, db.Error
 }
