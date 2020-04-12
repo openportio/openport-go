@@ -6,6 +6,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
+	"github.com/phayes/freeport"
 	flag "github.com/spf13/pflag"
 	"golang.org/x/crypto/ssh"
 	"io"
@@ -23,21 +24,21 @@ import (
 const VERSION = "2.0.0"
 
 type PortResponse struct {
-	ServerIP string `json:"server_ip"`
-	//	fallback_ssh_server_ip   string
-	//	fallback_ssh_server_port int
-	//	session_max_bytes        int64
-	//	open_port_for_ip_link    string
-	//	message                 string
-	//	session_end_time         float64
-	//	account_id               int
-	SessionToken string `json:"session_token"`
-	//	session_id               int
-	//	http_forward_address     string
-	ServerPort int `json:"server_port"`
-	//	key_id                   int
-	Error string `json:"error"`
-	//	fatal_error              bool
+	ServerIP              string  `json:"server_ip"`
+	FallbackSshServerIp   string  `json:"fallback_ssh_server_ip"`
+	FallbackSshServerPort int     `json:"fallback_ssh_server_port"`
+	SessionMaxBytes       int64   `json:"session_max_bytes"`
+	OpenPortForIpLink     string  `json:"open_port_for_ip_link"`
+	Message               string  `json:"message"`
+	SessionEndTime        float64 `json:"session_end_time"`
+	AccountId             int     `json:"account_id"`
+	SessionToken          string  `json:"session_token"`
+	SessionId             int     `json:"session_id"`
+	HttpForwardAddress    string  `json:"http_forward_address"`
+	ServerPort            int     `json:"server_port"`
+	KeyId                 int     `json:"key_id"`
+	Error                 string  `json:"error"`
+	FatalError            bool    `json:"key_id"`
 }
 
 func myUsage() {
@@ -142,8 +143,8 @@ func main() {
 			LocalPort:      port,
 			RestartCommand: strings.Join(os.Args, " "),
 		}
-		go startControlServer()
-		forwardPort(*server, session)
+		controlPort := startControlServer()
+		forwardPort(*server, session, controlPort)
 	}
 
 	/*
@@ -175,20 +176,24 @@ func main() {
 	*/
 }
 
-func stopSession(w http.ResponseWriter, r *http.Request){
+func stopSession(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "Ok")
 	go os.Exit(5)
 }
 
-func startControlServer(){
-	controlPort := "8888"
+func startControlServer() int {
+	controlPort, err := freeport.GetFreePort()
+	if err != nil {
+		log.Fatal(err)
+	}
 	router := mux.NewRouter().StrictSlash(true)
 	router.HandleFunc("/exit", stopSession)
-	println("Listening for control on port " + controlPort)
-	println(http.ListenAndServe("127.0.0.1:"+controlPort, router))
+	log.Printf("Listening for control on port %d", controlPort)
+	go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", controlPort), router)
+	return controlPort
 }
 
-func forwardPort(server string, session Session) {
+func forwardPort(server string, session Session, controlPort int) {
 	initDB()
 	port := session.LocalPort
 	dbSession, err := get(port)
@@ -215,15 +220,15 @@ func forwardPort(server string, session Session) {
 	}
 	log.Println(string(public_key))
 
-	post_url := fmt.Sprintf("%s/api/v1/request-port", server)
-	//post_url = "http://localhost:8000/internal/request-port"
-	resp, err := http.PostForm(post_url,
-		url.Values{
-			"public_key":     {string(public_key)},
-			"request_port":   {strconv.Itoa(dbSession.RemotePort)},
-			"client_version": {"2.0.0"},
-			"session_token":  {dbSession.SessionToken},
-		})
+	postUrl := fmt.Sprintf("%s/api/v1/request-port", server)
+	getParameters := url.Values{
+		"public_key":     {string(public_key)},
+		"request_port":   {strconv.Itoa(dbSession.RemotePort)},
+		"client_version": {"2.0.0"},
+		"restart_session_token":  {dbSession.SessionToken},
+	}
+	log.Printf("parameters: %s", getParameters)
+	resp, err := http.PostForm(postUrl, getParameters)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -246,8 +251,11 @@ func forwardPort(server string, session Session) {
 		fmt.Println("json error")
 		log.Fatal(json_err)
 	}
+
+	log.Printf("ServerPort: %s", response.ServerPort)
 	session.SessionToken = response.SessionToken
-	session.AppManagementPort = 8888 // TODO
+	session.AppManagementPort = controlPort
+	session.RemotePort = response.ServerPort
 	save(session)
 
 	config := &ssh.ClientConfig{
@@ -266,24 +274,21 @@ func forwardPort(server string, session Session) {
 	log.Println("connected")
 	session.Active = true
 	save(session)
+	defer setInactive(session)
 
 	s := fmt.Sprintf("0.0.0.0:%d", response.ServerPort)
-
 	addr, err := net.ResolveTCPAddr("tcp", s)
 	if err != nil {
 		panic("Could not get address: " + err.Error())
 	}
 
 	listener, err := conn.ListenTCP(addr)
-
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	log.Printf("Now forwarding remote port %s:%d to localhost", response.ServerIP, response.ServerPort)
-
 	defer listener.Close()
+	log.Printf("Now forwarding remote port %s:%d to localhost:%d", response.ServerIP, response.ServerPort, port)
 
-	defer setInactive(session)
 	for {
 		// Wait for a connection.
 		conn, err := listener.Accept()
@@ -309,10 +314,9 @@ func forwardPort(server string, session Session) {
 		}(conn)
 	}
 
-
 }
 
-func setInactive(session Session){
+func setInactive(session Session) {
 	session.Active = false
 	save(session)
 }
@@ -323,7 +327,8 @@ func setInactive(session Session){
 var dbPath string
 
 type Session struct {
-	gorm.Model
+	// gorm.Model
+	ID           int64 `gorm:"AUTO_INCREMENT;PRIMARY_KEY"`
 	Server       string
 	SessionToken string
 
@@ -353,16 +358,7 @@ func initDB() {
 
 	// Migrate the schema
 	db.AutoMigrate(&Session{})
-}
-
-func create(session Session) error {
-	db, err := gorm.Open("sqlite3", dbPath)
-	if err != nil {
-		panic("failed to connect database")
-	}
-	defer db.Close()
-	db.Create(&session)
-	return db.Error
+	log.Printf("db created")
 }
 
 func get(port int) (Session, error) {
@@ -380,26 +376,19 @@ func get(port int) (Session, error) {
 	return session, nil
 }
 
-/*
-func delete(port int) error {
-	session, err := get(port)
-	if err != nil {
-		log.Fatalf("could not get session: %s", err)
-	}
+func save(session Session) error {
 	db, err := gorm.Open("sqlite3", dbPath)
 	if err != nil {
 		panic("failed to connect database")
 	}
 	defer db.Close()
-	db.Delete(&session)
-	return db.Error
-}
-*/
-func save(session Session) {
-	db, err := gorm.Open("sqlite3", dbPath)
-	if err != nil {
-		panic("failed to connect database")
+
+	existingSession, err := get(session.LocalPort)
+	if err == nil {
+		session.ID = existingSession.ID
+	} else {
+		return err
 	}
-	defer db.Close()
 	db.Save(&session)
+	return db.Error
 }

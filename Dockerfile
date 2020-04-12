@@ -21,4 +21,4 @@ RUN go mod download
 
 COPY . /apps/go/
 
-RUN go build -o openport cmd/openport/main.go
+RUN go build -o openport main.go
