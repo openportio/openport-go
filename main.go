@@ -84,6 +84,10 @@ func main() {
 	killFlagSet.StringVar(&dbPath, "database", "~/.openport/openport.db", "Database file") //databaseFlag :=
 	killFlagSet.Bool("verbose", false, "Verbose logging")                                  // verbose :=
 
+	killAllFlagSet := flag.NewFlagSet("kill-all", flag.ExitOnError)
+	killAllFlagSet.StringVar(&dbPath, "database", "~/.openport/openport.db", "Database file") //databaseFlag :=
+	killAllFlagSet.Bool("verbose", false, "Verbose logging")                                  // verbose :=
+
 	restartSharesFlagSet := flag.NewFlagSet("restart-shares", flag.ExitOnError)
 	restartSharesFlagSet.StringVar(&dbPath, "database", "~/.openport/openport.db", "Database file") //databaseFlag :=
 	restartSharesFlagSet.Bool("verbose", false, "Verbose logging")
@@ -132,6 +136,11 @@ func main() {
 			log.Fatalf("Could not kill session: %s", err3)
 		}
 		println(resp)
+	case "kill-all":
+		killAllFlagSet.Parse(os.Args[2:])
+		initDB()
+		killAll()
+		os.Exit(0)
 	case "restart-shares":
 		restartSharesFlagSet.Parse(os.Args[2:])
 		restartShares()
@@ -212,6 +221,23 @@ func restartShares() {
 			if err != nil {
 				logrus.Warn(err)
 			}
+		}
+	}
+}
+
+func killAll() {
+	sessions, err := getAllActive()
+	if err != nil {
+		panic(err)
+	}
+	for _, session := range sessions {
+		resp, err3 := http.Get(fmt.Sprintf("http://127.0.0.1:%d/exit", session.AppManagementPort))
+		if err3 != nil {
+			session.Active = false
+			save(session)
+			logrus.Warn("Could not kill session: %s", err3)
+		} else {
+			println(resp)
 		}
 	}
 }
