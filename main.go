@@ -22,6 +22,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const VERSION = "2.0.0"
@@ -70,6 +71,7 @@ func main() {
 	httpForward := defaultFlagSet.Bool("http-forward", false, "Request an http forward, so you can connect to port 80 on the server.")
 
 	restartOnReboot := defaultFlagSet.Bool("restart-on-reboot", false, "Restart this share when 'restart-shares' is called (on boot for example).")
+	keepAliveSeconds := defaultFlagSet.Int("keep-alive", 120, "The interval in between keep-alive messages in seconds.")
 
 	defaultFlagSet.MarkHidden("database")
 	defaultFlagSet.MarkHidden("server")
@@ -176,6 +178,7 @@ func main() {
 		session.OpenPortForIpLink = *ipLinkProtection
 		session.HttpForward = *httpForward
 		session.Server = *server
+		session.KeepAliveSeconds = *keepAliveSeconds
 		if *restartOnReboot {
 			session.RestartCommand = strings.Join(os.Args[1:], " ")
 		}
@@ -319,13 +322,10 @@ func forwardPort(session Session) {
 
 	body, err := ioutil.ReadAll(resp.Body)
 	fmt.Println(string(body))
-
 	if err != nil {
 		fmt.Println("http error")
 		log.Fatal(err)
 	}
-	fmt.Println(string(body))
-	fmt.Println("here1")
 	var jsonData = []byte(body)
 	response := PortResponse{}
 	jsonErr := json.Unmarshal(jsonData, &response)
@@ -383,6 +383,8 @@ func forwardPort(session Session) {
 		log.Printf("Now forwarding remote port %s:%d to localhost:%d", response.ServerIP, response.ServerPort, port)
 	}
 	log.Printf(response.Message)
+	keepAliveDone := make(chan bool, 1)
+	go keepAlive(conn, time.Duration(int64(session.KeepAliveSeconds) * int64(time.Second)), keepAliveDone)
 
 	for {
 		// Wait for a connection.
@@ -409,6 +411,22 @@ func forwardPort(session Session) {
 		}(conn)
 	}
 
+}
+
+func keepAlive(cl *ssh.Client, keepAliveInterval time.Duration, done <-chan bool) {
+	t := time.NewTicker(keepAliveInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			_, _, err := cl.SendRequest("keep-alive", true, nil)
+			if err != nil {
+				logrus.Warn(err, "failed to send keep alive")
+			}
+		case <-done:
+			return
+		}
+	}
 }
 
 func setInactive(session Session) {
@@ -440,6 +458,8 @@ type Session struct {
 
 	AppManagementPort int
 	OpenPortForIpLink string
+
+	KeepAliveSeconds int
 }
 
 func initDB() {
