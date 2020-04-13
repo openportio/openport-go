@@ -19,6 +19,6 @@ COPY go.mod \
     /apps/go/
 RUN go mod download
 
-COPY . /apps/go/
+COPY main.go /apps/go/
 
 RUN go build -o openport main.go
