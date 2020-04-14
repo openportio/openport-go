@@ -13,6 +13,7 @@ import (
 	"github.com/orandin/lumberjackrus"
 	"github.com/phayes/freeport"
 	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/writer"
 	flag "github.com/spf13/pflag"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/net/proxy"
@@ -76,19 +77,17 @@ func myUsage() {
 	flag.PrintDefaults()
 }
 
-func init() {
-	log.SetOutput(os.Stdout)
-	log.SetFormatter(&log.TextFormatter{
-		DisableTimestamp: true,
-	})
+var stdOutLogHook writer.Hook
+var verbose bool
+
+func initLogging() {
+	log.SetLevel(log.DebugLevel)
 	hook, err := lumberjackrus.NewHook(
 		&lumberjackrus.LogFile{
 			Filename:   OPENPORT_LOG_PATH,
-			MaxSize:    1,
+			MaxSize:    10,
 			MaxBackups: 1,
-			MaxAge:     1,
-			Compress:   false,
-			LocalTime:  false,
+			Compress:   true,
 		},
 		log.DebugLevel,
 		&log.TextFormatter{
@@ -101,14 +100,38 @@ func init() {
 		log.Warn(err)
 	}
 	log.AddHook(hook)
-}
+	log.SetOutput(ioutil.Discard) // Send all logs to nowhere by default
 
-var verbose bool
+	log.AddHook(&writer.Hook{ // Send logs with level higher than warning to stderr
+		Writer: os.Stderr,
+		LogLevels: []log.Level{
+			log.PanicLevel,
+			log.FatalLevel,
+			log.ErrorLevel,
+			log.WarnLevel,
+		},
+	})
 
-func setVerbose() {
-	if verbose {
-		log.SetLevel(log.DebugLevel)
+	stdOutLogHook = writer.Hook{
+		Writer: os.Stdout,
+		LogLevels: []log.Level{
+			log.InfoLevel,
+		},
 	}
+
+	if verbose {
+		stdOutLogHook.LogLevels = []log.Level{
+			log.InfoLevel,
+			log.DebugLevel,
+		}
+	}
+
+	log.AddHook(&stdOutLogHook)
+	log.SetFormatter(&log.TextFormatter{
+		ForceColors:            true,
+		DisableTimestamp:       true,
+		DisableLevelTruncation: true,
+	})
 }
 
 func main() {
@@ -166,7 +189,7 @@ func main() {
 		os.Exit(0)
 	case "register-key":
 		registerKeyCmd.Parse(os.Args[2:])
-		setVerbose()
+		initLogging()
 		ensureKeysExist()
 		tail := defaultFlagSet.Args()
 		token := tail[0]
@@ -178,7 +201,7 @@ func main() {
 		os.Exit(0)
 	case "kill":
 		killFlagSet.Parse(os.Args[2:])
-		setVerbose()
+		initLogging()
 		ensureHomeFolderExists()
 		tail := killFlagSet.Args()
 		if len(tail) == 0 {
@@ -203,20 +226,20 @@ func main() {
 		log.Debug(resp)
 	case "kill-all":
 		killAllFlagSet.Parse(os.Args[2:])
-		setVerbose()
+		initLogging()
 		ensureHomeFolderExists()
 		initDB()
 		killAll()
 		os.Exit(0)
 	case "restart-shares":
 		restartSharesFlagSet.Parse(os.Args[2:])
-		setVerbose()
+		initLogging()
 		ensureHomeFolderExists()
 		restartShares()
 		os.Exit(0)
 	default:
 		defaultFlagSet.Parse(os.Args[1:])
-		setVerbose()
+		initLogging()
 		tail := defaultFlagSet.Args()
 		if port == -1 {
 			if len(tail) == 0 {
@@ -241,6 +264,7 @@ func main() {
 			Server:            *server,
 			KeepAliveSeconds:  *keepAliveSeconds,
 			Proxy:             *socksProxy,
+			Active:            true,
 		}
 		controlPort := startControlServer(*controlPort)
 		session.AppManagementPort = controlPort
@@ -252,11 +276,8 @@ func main() {
 	}
 
 	/*
-	   parser.add_argument('--verbose', '-v', action='store_true', help='Be verbose.')
 	   group.add_argument('--list', '-l', action='store_true', help="List shares and exit.")
 	   parser.add_argument('--listener-port', type=int, default=-1, help=argparse.SUPPRESS)
-	   parser.add_argument('--request-port', type=int, default=-1, metavar='REMOTE_PORT',
-	                       help='Request the server port for the share. Do not forget to pass the token with --request-token.')
 	   parser.add_argument('--forward-tunnel', action='store_true',
 	                       help='Forward connections from your local port to the server port. Use this to connect two tunnels.')
 	   parser.add_argument('--remote-port', type=int, help='The server port you want to forward to'
@@ -431,7 +452,11 @@ func forwardPort(session Session) error {
 	dbSession, err := get(port)
 	if err != nil {
 		dbSession = Session{}
+	} else {
+		session.SessionToken = dbSession.SessionToken
+		session.RemotePort = dbSession.RemotePort
 	}
+	save(session)
 
 	if session.Proxy != "" {
 		os.Setenv("HTTPS_PROXY", session.Proxy)
@@ -441,10 +466,10 @@ func forwardPort(session Session) error {
 	postUrl := fmt.Sprintf("%s/api/v1/request-port", session.Server)
 	getParameters := url.Values{
 		"public_key":            {string(publicKey)},
-		"request_port":          {strconv.Itoa(dbSession.RemotePort)},
+		"request_port":          {strconv.Itoa(session.RemotePort)},
 		"client_version":        {"2.0.0"},
-		"restart_session_token": {dbSession.SessionToken},
-		"local_port":            {strconv.Itoa(dbSession.LocalPort)},
+		"restart_session_token": {session.SessionToken},
+		"local_port":            {strconv.Itoa(session.LocalPort)},
 		"http_forward":          {strconv.FormatBool(session.HttpForward)},
 		"platform":              {runtime.GOOS},
 		/*
@@ -467,12 +492,12 @@ func forwardPort(session Session) error {
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
-	log.Debugf(string(body))
 	if err != nil {
 		log.Debugf("http error")
 		log.Warn(err)
 		return err
 	}
+	log.Debugf(string(body))
 	var jsonData = []byte(body)
 	response := PortResponse{}
 	jsonErr := json.Unmarshal(jsonData, &response)
