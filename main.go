@@ -28,6 +28,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -137,27 +138,40 @@ func initLogging() {
 func main() {
 	defaultFlagSet := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	var port int
-	defaultFlagSet.IntVar(&port, "port", -1, "The local port you want to openport.")
+	var controlPort int
+	var server string
+	var restartOnReboot bool
+	var keepAliveSeconds int
+	var socksProxy string
+	var remotePort int
 
-	defaultFlagSet.IntVar(&port, "local-port", -1, "The local port you want to openport.")
-	controlPort := defaultFlagSet.Int("listener-port", -1, "")
-	server := defaultFlagSet.String("server", "https://openport.io", "The server to connect to")
-	defaultFlagSet.BoolVar(&verbose, "verbose", false, "Verbose logging")
-	defaultFlagSet.StringVar(&dbPath, "database", OPENPORT_HOME+"/openport.db", "Database file")
+	addSharedFlags := func(set *flag.FlagSet) {
+		set.IntVar(&port, "port", -1, "The local port you want to expose.")
+		set.IntVar(&port, "local-port", -1, "The local port you want to expose.")
+		set.IntVar(&remotePort, "remote-port", -1, "The remote port on the server.")
+		set.IntVar(&controlPort, "listener-port", -1, "")
+		set.StringVar(&server, "server", "https://openport.io", "The server to connect to.")
+		set.BoolVar(&verbose, "verbose", false, "Verbose logging")
+		set.StringVar(&dbPath, "database", OPENPORT_HOME+"/openport.db", "Database file")
+		set.BoolVar(&restartOnReboot, "restart-on-reboot", false, "Restart this share when 'restart-shares' is called (on boot for example).")
+		set.IntVar(&keepAliveSeconds, "keep-alive", 120, "The interval in between keep-alive messages in seconds.")
+		set.StringVar(&socksProxy, "proxy", "", "Socks5 proxy to use. Format: socks5://user:pass@host:port")
+
+		set.MarkHidden("database")
+		set.MarkHidden("server")
+		set.MarkHidden("listener-port")
+	}
+
+	addSharedFlags(defaultFlagSet)
+
 	ipLinkProtection := defaultFlagSet.String("ip-link-protection", "",
 		"Set to True or False to set if you want users to click a secret link before they can "+
 			"access this port. This overwrites the standard setting in your profile for this "+
 			"session. choices=[True, False]")
 	httpForward := defaultFlagSet.Bool("http-forward", false, "Request an http forward, so you can connect to port 80 on the server.")
 
-	restartOnReboot := defaultFlagSet.Bool("restart-on-reboot", false, "Restart this share when 'restart-shares' is called (on boot for example).")
-	keepAliveSeconds := defaultFlagSet.Int("keep-alive", 120, "The interval in between keep-alive messages in seconds.")
-
-	socksProxy := defaultFlagSet.String("proxy", "", "Socks5 proxy to use. Format: socks5://user:pass@host:port")
-
-	defaultFlagSet.MarkHidden("database")
-	defaultFlagSet.MarkHidden("server")
-	defaultFlagSet.MarkHidden("listener-port")
+	forwardTunnelFlagSet := flag.NewFlagSet("forward", flag.ExitOnError)
+	addSharedFlags(forwardTunnelFlagSet)
 
 	flag.NewFlagSet("version", flag.ExitOnError)
 
@@ -198,7 +212,6 @@ func main() {
 		// TODO!!
 	case "version":
 		fmt.Println(VERSION)
-		os.Exit(0)
 	case "kill":
 		killFlagSet.Parse(os.Args[2:])
 		initLogging()
@@ -215,7 +228,7 @@ func main() {
 			os.Exit(6)
 		}
 		initDB()
-		session, err2 := get(port)
+		session, err2 := get(port, false)
 		if err2 != nil {
 			log.Fatalf("session not found? %s", err2)
 		}
@@ -230,30 +243,44 @@ func main() {
 		ensureHomeFolderExists()
 		initDB()
 		killAll()
-		os.Exit(0)
 	case "restart-shares":
 		restartSharesFlagSet.Parse(os.Args[2:])
 		initLogging()
 		ensureHomeFolderExists()
 		restartShares()
-		os.Exit(0)
+
 	default:
-		defaultFlagSet.Parse(os.Args[1:])
+		forwardTunnel := os.Args[1] == "forward"
+		if forwardTunnel {
+			defaultFlagSet.Parse(os.Args[2:])
+		} else {
+			defaultFlagSet.Parse(os.Args[1:])
+		}
+
 		initLogging()
 		tail := defaultFlagSet.Args()
 		if port == -1 {
 			if len(tail) == 0 {
-				myUsage()
-				os.Exit(2)
-			}
+				if forwardTunnel {
+					var err error
+					port, err = freeport.GetFreePort()
+					if err != nil {
+						log.Fatalf("error getting free port: %s", err)
+					}
+				} else {
+					myUsage()
+					os.Exit(2)
+				}
+			} else {
 
-			var err error
-			port, err = strconv.Atoi(tail[0])
-			if err != nil {
-				log.Warnf("failing: %s %s", tail, err)
+				var err error
+				port, err = strconv.Atoi(tail[0])
+				if err != nil {
+					log.Warnf("failing: %s %s", tail, err)
 
-				flag.Usage()
-				os.Exit(3)
+					flag.Usage()
+					os.Exit(3)
+				}
 			}
 		}
 
@@ -261,18 +288,20 @@ func main() {
 			LocalPort:         port,
 			OpenPortForIpLink: *ipLinkProtection,
 			HttpForward:       *httpForward,
-			Server:            *server,
-			KeepAliveSeconds:  *keepAliveSeconds,
-			Proxy:             *socksProxy,
+			Server:            server,
+			KeepAliveSeconds:  keepAliveSeconds,
+			Proxy:             socksProxy,
 			Active:            true,
+			ForwardTunnel:     forwardTunnel,
+			RemotePort:        remotePort,
 		}
-		controlPort := startControlServer(*controlPort)
+		controlPort := startControlServer(controlPort)
 		session.AppManagementPort = controlPort
 
-		if *restartOnReboot {
+		if restartOnReboot {
 			session.RestartCommand = strings.Join(os.Args[1:], " ")
 		}
-		forwardPort(session)
+		createTunnel(session)
 	}
 
 	/*
@@ -435,7 +464,7 @@ func startControlServer(controlPort int) int {
 		var err error
 		controlPort, err = freeport.GetFreePort()
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("Could not start control server: %s", err)
 		}
 	}
 	router := mux.NewRouter().StrictSlash(true)
@@ -445,22 +474,42 @@ func startControlServer(controlPort int) int {
 	return controlPort
 }
 
-func forwardPort(session Session) error {
+func createTunnel(session Session) error {
 	publicKey, key, err := ensureKeysExist()
 	initDB()
 	port := session.LocalPort
-	dbSession, err := get(port)
+	dbSession, err := get(port, session.ForwardTunnel)
 	if err != nil {
 		dbSession = Session{}
 	} else {
-		session.SessionToken = dbSession.SessionToken
-		session.RemotePort = dbSession.RemotePort
+		if session.RemotePort < 0 || session.RemotePort == dbSession.RemotePort {
+			session.SessionToken = dbSession.SessionToken
+			session.RemotePort = dbSession.RemotePort
+		}
 	}
 	save(session)
+	for {
+		response, err2 := requestPortForward(&session, publicKey)
+		if err2 != nil {
+			log.Error(err2)
+		}
 
+		var err error
+		if session.ForwardTunnel {
+			err = startForwardTunnel(key, session, response.Message)
+		} else {
+			err = startReverseTunnel(key, session, response.Message)
+		}
+		log.Warn(err)
+		time.Sleep(10 * time.Second)
+	}
+}
+
+func requestPortForward(session *Session, publicKey []byte) (PortResponse, error) {
 	if session.Proxy != "" {
-		os.Setenv("HTTPS_PROXY", session.Proxy)
-		os.Setenv("HTTP_PROXY", session.Proxy)
+		p := strings.Replace(session.Proxy, "socks5h", "socks5", 1)
+		os.Setenv("HTTPS_PROXY", p)
+		os.Setenv("HTTP_PROXY", p)
 	}
 
 	postUrl := fmt.Sprintf("%s/api/v1/request-port", session.Server)
@@ -472,10 +521,10 @@ func forwardPort(session Session) error {
 		"local_port":            {strconv.Itoa(session.LocalPort)},
 		"http_forward":          {strconv.FormatBool(session.HttpForward)},
 		"platform":              {runtime.GOOS},
+		"forward_tunnel":        {strconv.FormatBool(session.ForwardTunnel)},
 		/*
 			TODO:
 			   automatic_restart = forms.BooleanField(required=False)
-			   forward_tunnel = forms.BooleanField(required=False)
 		*/
 	}
 	switch session.OpenPortForIpLink {
@@ -488,14 +537,14 @@ func forwardPort(session Session) error {
 	log.Debugf("parameters: %s", getParameters)
 	resp, err := http.PostForm(postUrl, getParameters)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Error communicating with %s: %s", session.Server, err)
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Debugf("http error")
 		log.Warn(err)
-		return err
+		return PortResponse{}, err
 	}
 	log.Debugf(string(body))
 	var jsonData = []byte(body)
@@ -503,30 +552,82 @@ func forwardPort(session Session) error {
 	jsonErr := json.Unmarshal(jsonData, &response)
 	if jsonErr != nil {
 		log.Warnf("json error: %s", err)
-		return jsonErr
+		return PortResponse{}, jsonErr
 	}
 
 	log.Debugf("ServerPort: %d", response.ServerPort)
 	session.SessionToken = response.SessionToken
 	session.RemotePort = response.ServerPort
-	session.Server = response.ServerIP
+	session.SshServer = response.ServerIP
 	session.Pid = os.Getpid()
 	session.AccountId = response.AccountId
 	session.KeyId = response.KeyId
 	session.HttpForwardAddress = response.HttpForwardAddress
 	session.OpenPortForIpLink = response.OpenPortForIpLink
-	err = save(session)
+	err = save(*session)
 	if err != nil {
 		log.Warn(err)
 	}
+	return response, nil
+}
+func startReverseTunnel(key ssh.Signer, session Session, message string) error {
+	sshClient, keepAliveDone, err2 := connect(key, session)
+	if err2 != nil {
+		return err2
+	}
+	defer func() { keepAliveDone <- true }()
+
+	log.Debugf("connected")
+	session.Active = true
+	save(session)
+	defer setInactive(session)
+	s := fmt.Sprintf("0.0.0.0:%d", session.RemotePort)
+	addr, err := net.ResolveTCPAddr("tcp", s)
+	if err != nil {
+		return err
+	}
+
+	listener, err := sshClient.ListenTCP(addr)
+	if err != nil {
+		log.Errorf("Could not listen on remote port: %s", err)
+		return err
+	}
+	defer listener.Close()
+	if session.HttpForward {
+		log.Infof("Now forwarding remote address %s to localhost", session.HttpForwardAddress)
+	} else {
+		log.Infof("Now forwarding remote port %s:%d to localhost:%d", session.SshServer, session.RemotePort, session.LocalPort)
+	}
+	log.Infof(message)
+
 	for {
-		err := startPortForward(key, session, response.Message)
-		log.Warn(err)
-		time.Sleep(10 * time.Second)
+		// Wait for a connection.
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Errorf("Could not accept connection: %s", err)
+			continue
+		}
+
+		go func(c net.Conn) {
+			log.Debugf("new request")
+			conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", session.LocalPort))
+			if err != nil {
+				log.Warn(err)
+			} else {
+				go func() {
+					defer c.Close()
+					defer conn.Close()
+					io.Copy(c, conn)
+				}()
+				go func() {
+					io.Copy(conn, c)
+				}()
+			}
+		}(conn)
 	}
 }
-func startPortForward(key ssh.Signer, session Session, message string) error {
 
+func connect(key ssh.Signer, session Session) (*ssh.Client, chan bool, error) {
 	config := &ssh.ClientConfig{
 		User: "open",
 		Auth: []ssh.AuthMethod{
@@ -537,14 +638,13 @@ func startPortForward(key ssh.Signer, session Session, message string) error {
 
 	var sshClient *ssh.Client
 	var err error
-	openportSshAddress := fmt.Sprintf("%s:%d", session.Server, 22)
-
+	sshAddress := fmt.Sprintf("%s:%d", session.SshServer, 22)
 	if session.Proxy != "" {
 		// create a socks5 dialer
 
 		u, err := url.Parse(session.Proxy)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("Could not parse proxy server: %s", err)
 		}
 		var proxyAuth proxy.Auth
 		proxyPassword, proxyPasswordSet := u.User.Password()
@@ -565,73 +665,27 @@ func startPortForward(key ssh.Signer, session Session, message string) error {
 		proxyDialer, err := proxy.SOCKS5("tcp", proxyServer, &proxyAuth, proxy.Direct)
 		if err != nil {
 			log.Warnf("can't connect to the proxy: %s", err)
-			return err
+			return nil, nil, err
 		}
-		conn, err := proxyDialer.Dial("tcp", openportSshAddress)
+		conn, err := proxyDialer.Dial("tcp", sshAddress)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
-		c, chans, reqs, err := ssh.NewClientConn(conn, openportSshAddress, config)
+		c, chans, reqs, err := ssh.NewClientConn(conn, sshAddress, config)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		sshClient = ssh.NewClient(c, chans, reqs)
 	} else {
-		sshClient, err = ssh.Dial("tcp", openportSshAddress, config)
+		sshClient, err = ssh.Dial("tcp", sshAddress, config)
 		if err != nil {
 			panic("Failed to dial: " + err.Error())
 		}
 	}
-	log.Debugf("connected")
-	session.Active = true
-	save(session)
-	defer setInactive(session)
 
-	s := fmt.Sprintf("0.0.0.0:%d", session.RemotePort)
-	addr, err := net.ResolveTCPAddr("tcp", s)
-	if err != nil {
-		return err
-	}
-
-	listener, err := sshClient.ListenTCP(addr)
-	if err != nil {
-		log.Fatal(err.Error())
-	}
-	defer listener.Close()
-	if session.HttpForward {
-		log.Infof("Now forwarding remote address %s to localhost", session.HttpForwardAddress)
-	} else {
-		log.Infof("Now forwarding remote port %s:%d to localhost:%d", session.Server, session.RemotePort, session.LocalPort)
-	}
-	log.Infof(message)
 	keepAliveDone := make(chan bool, 1)
 	go keepAlive(sshClient, time.Duration(int64(session.KeepAliveSeconds)*int64(time.Second)), keepAliveDone)
-
-	for {
-		// Wait for a connection.
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		go func(c net.Conn) {
-			log.Debugf("new request")
-			conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", session.LocalPort))
-			if err != nil {
-				log.Warn(err)
-			} else {
-				go func() {
-					defer c.Close()
-					defer conn.Close()
-					io.Copy(c, conn)
-				}()
-				go func() {
-					io.Copy(conn, c)
-				}()
-			}
-		}(conn)
-	}
-
+	return sshClient, keepAliveDone, nil
 }
 
 func keepAlive(cl *ssh.Client, keepAliveInterval time.Duration, done <-chan bool) {
@@ -650,6 +704,54 @@ func keepAlive(cl *ssh.Client, keepAliveInterval time.Duration, done <-chan bool
 	}
 }
 
+func startForwardTunnel(key ssh.Signer, session Session, msg string) error {
+	sshClient, keepAliveDone, err2 := connect(key, session)
+	if err2 != nil {
+		return err2
+	}
+	defer func() { keepAliveDone <- true }()
+
+	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", session.LocalPort))
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+
+	log.Info(msg)
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return err
+		}
+		log.Debugf("Incoming request on forward tunnel from %s", conn.RemoteAddr())
+		go handleRequestOnForwardTunnel(sshClient, conn, session)
+	}
+}
+
+func handleRequestOnForwardTunnel(sshClient *ssh.Client, localConn net.Conn, session Session) error {
+	remoteConn, err := sshClient.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", session.RemotePort))
+	if err != nil {
+		log.Errorf("server dial error: %s", err)
+		return err
+	}
+
+	var closeOnce sync.Once
+	closeConns := func() {
+		localConn.Close()
+		remoteConn.Close()
+	}
+	copyConn := func(writer, reader net.Conn) {
+		defer closeOnce.Do(closeConns)
+		_, err := io.Copy(writer, reader)
+		if err != nil {
+			log.Debugf("io.Copy error: %s", err)
+		}
+	}
+	go copyConn(localConn, remoteConn)
+	go copyConn(remoteConn, localConn)
+	return nil
+}
+
 func setInactive(session Session) {
 	session.Active = false
 	save(session)
@@ -666,6 +768,7 @@ type Session struct {
 	Server       string
 	SessionToken string
 
+	SshServer      string
 	RemotePort     int
 	LocalPort      int
 	Pid            int
@@ -682,10 +785,10 @@ type Session struct {
 
 	KeepAliveSeconds int
 	Proxy            string
+	ForwardTunnel    bool
 }
 
 func initDB() {
-
 	log.Debugf("db path: %s", dbPath)
 	db, err := gorm.Open("sqlite3", dbPath)
 	if err != nil {
@@ -698,7 +801,7 @@ func initDB() {
 	log.Debugf("db created")
 }
 
-func get(port int) (Session, error) {
+func get(port int, forwardTunnel bool) (Session, error) {
 	db, err := gorm.Open("sqlite3", dbPath)
 	if err != nil {
 		panic("failed to connect database")
@@ -706,7 +809,7 @@ func get(port int) (Session, error) {
 	defer db.Close()
 
 	var session Session
-	db.First(&session, "local_port = ?", port)
+	db.First(&session, "local_port = ? and forward_tunnel = ?", port, forwardTunnel)
 	if db.Error != nil {
 		return session, db.Error
 	}
@@ -720,7 +823,7 @@ func save(session Session) error {
 	}
 	defer db.Close()
 
-	existingSession, err := get(session.LocalPort)
+	existingSession, err := get(session.LocalPort, session.ForwardTunnel)
 	if err == nil {
 		session.ID = existingSession.ID
 	} else {
