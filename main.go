@@ -72,7 +72,15 @@ type PortResponse struct {
 	ServerPort            int     `json:"server_port"`
 	KeyId                 int     `json:"key_id"`
 	Error                 string  `json:"error"`
-	FatalError            bool    `json:"key_id"`
+	FatalError            bool    `json:"fatal_error"`
+}
+
+type ServerResponseError struct {
+	error string
+}
+
+func (s ServerResponseError) Error() string {
+	return s.error
 }
 
 func myUsage() {
@@ -569,6 +577,8 @@ func createTunnel(session Session) error {
 		response, err2 := requestPortForward(&session, publicKey)
 		if err2 != nil {
 			log.Error(err2)
+			time.Sleep(10 * time.Second)
+			continue
 		}
 
 		var err error
@@ -578,7 +588,10 @@ func createTunnel(session Session) error {
 			err = startReverseTunnel(key, session, response.Message)
 		}
 		log.Warn(err)
-		time.Sleep(10 * time.Second)
+		if session.AutomaticRestart{
+			time.Sleep(10 * time.Second)
+		}
+		session.AutomaticRestart = true
 	}
 }
 
@@ -600,10 +613,7 @@ func requestPortForward(session *Session, publicKey []byte) (PortResponse, error
 		"platform":              {runtime.GOOS},
 		"forward_tunnel":        {strconv.FormatBool(session.ForwardTunnel)},
 		"ssh_server":            {session.SshServer},
-		/*
-			TODO:
-			   automatic_restart = forms.BooleanField(required=False)
-		*/
+		"automatic_restart":     {strconv.FormatBool(session.AutomaticRestart)},
 	}
 	switch session.OpenPortForIpLink {
 	case "True", "False":
@@ -633,6 +643,15 @@ func requestPortForward(session *Session, publicKey []byte) (PortResponse, error
 		return PortResponse{}, jsonErr
 	}
 
+	if response.Error != "" {
+		if response.FatalError {
+			log.Infof("Stopping session on request of server: %s", response.Error)
+			setInactive(*session)
+			os.Exit(0)
+		}
+		return PortResponse{}, ServerResponseError{response.Error}
+	}
+
 	log.Debugf("ServerPort: %d", response.ServerPort)
 	session.SessionToken = response.SessionToken
 	session.RemotePort = response.ServerPort
@@ -643,6 +662,7 @@ func requestPortForward(session *Session, publicKey []byte) (PortResponse, error
 	session.HttpForwardAddress = response.HttpForwardAddress
 	session.OpenPortForIpLink = response.OpenPortForIpLink
 	err = save(*session)
+
 	if err != nil {
 		log.Warn(err)
 	}
@@ -683,7 +703,7 @@ func startReverseTunnel(key ssh.Signer, session Session, message string) error {
 		conn, err := listener.Accept()
 		if err != nil {
 			log.Errorf("Could not accept connection: %s", err)
-			continue
+			return err
 		}
 
 		go func(c net.Conn) {
@@ -864,6 +884,8 @@ type Session struct {
 	KeepAliveSeconds int
 	Proxy            string
 	ForwardTunnel    bool
+
+	AutomaticRestart bool `gorm:"-"`
 }
 
 func initDB() {
