@@ -8,6 +8,8 @@ import (
 	"encoding/pem"
 	"fmt"
 	"github.com/gorilla/mux"
+	"github.com/jedib0t/go-pretty/table"
+	"github.com/jedib0t/go-pretty/text"
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 	"github.com/orandin/lumberjackrus"
@@ -93,6 +95,7 @@ var verbose bool
 
 func initLogging() {
 	log.SetLevel(log.DebugLevel)
+	log.WithField("pid", os.Getpid())
 	hook, err := lumberjackrus.NewHook(
 		&lumberjackrus.LogFile{
 			Filename:   OPENPORT_LOG_PATH,
@@ -200,6 +203,10 @@ func main() {
 	restartSharesFlagSet.StringVar(&dbPath, "database", OPENPORT_DB_PATH, "Database file")
 	restartSharesFlagSet.BoolVar(&verbose, "verbose", false, "Verbose logging")
 
+	listFlagSet := flag.NewFlagSet("list", flag.ExitOnError)
+	listFlagSet.StringVar(&dbPath, "database", OPENPORT_DB_PATH, "Database file")
+	listFlagSet.BoolVar(&verbose, "verbose", false, "Verbose logging")
+
 	flag.Usage = myUsage
 
 	if len(os.Args) == 1 {
@@ -261,7 +268,12 @@ func main() {
 		initLogging()
 		ensureHomeFolderExists()
 		restartShares()
-
+	case "list":
+		listFlagSet.Parse(os.Args[2:])
+		initLogging()
+		ensureHomeFolderExists()
+		initDB()
+		listSessions()
 	default:
 		forwardTunnel := os.Args[1] == "forward"
 		var remotePortInt int
@@ -342,6 +354,58 @@ func main() {
 	   group.add_argument('--list', '-l', action='store_true', help="List shares and exit.")
 	   parser.add_argument('--daemonize', '-d', action='store_true', help='Start the app in the background.')
 	*/
+}
+
+func sessionIsLive(session Session) bool {
+	url := fmt.Sprintf("http://127.0.0.1:%d/info", session.AppManagementPort)
+	log.Debug(url)
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Debugf("Error while requesting %s: %s", url, err)
+		return false
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Debugf("Error while getting the body of %s: %s", url, err)
+		return false
+	}
+	log.Debugf("Got response on url %s: %s", url, body)
+	return string(body)[:8] == "openport"
+}
+
+func listSessions() {
+	tw := table.NewWriter()
+	tw.SetStyle(table.StyleRounded)
+	tw.Style().Format.Header = text.FormatTitle
+	tw.SetOutputMirror(os.Stdout)
+	tw.AppendHeader(table.Row{
+		"Local Port",
+		"Server",
+		"Remote Port",
+		"Open-For-IP-Link",
+		"Running",
+		"Restart-On-Reboot",
+		"Forward Tunnel",
+	})
+	tw.SetTitle("Active Openport Sessions")
+	sessions, err := getAllActive()
+	if err != nil {
+		panic(err)
+	}
+	for _, session := range sessions {
+		log.Debugf("adding row %s", session)
+		tw.AppendRow([]interface{}{
+			session.LocalPort,
+			session.SshServer,
+			session.RemotePort,
+			session.OpenPortForIpLink,
+			sessionIsLive(session),
+			session.RestartCommand != "",
+			session.ForwardTunnel,
+			})
+	}
+	tw.Render()
 }
 
 func createKeys() ([]byte, ssh.Signer, error) {
@@ -518,7 +582,7 @@ func portIsAvailable(port int) bool {
 	return true
 }
 
-func enrichSessionWithHistory(session *Session) {
+func enrichSessionWithHistory(session *Session) Session {
 	if session.ForwardTunnel {
 		if session.LocalPort < 0 {
 			dbSession, err := get_forward_session(session.RemotePort, session.SshServer)
@@ -529,6 +593,7 @@ func enrichSessionWithHistory(session *Session) {
 					session.LocalPort = dbSession.LocalPort
 				}
 			}
+			return dbSession
 		}
 	} else {
 		dbSession, err := get_session(session.LocalPort)
@@ -545,7 +610,9 @@ func enrichSessionWithHistory(session *Session) {
 			}
 		}
 		_ = save(*session)
+		return dbSession
 	}
+	return Session{}
 }
 
 func handleSignals(session Session) {
@@ -566,7 +633,11 @@ func createTunnel(session Session) error {
 		log.Fatalf("Error during fetching/creating key: %s", err)
 	}
 	initDB()
-	enrichSessionWithHistory(&session)
+	dbSession := enrichSessionWithHistory(&session)
+	if dbSession.ID > 0 && sessionIsLive(dbSession){
+		log.Fatalf("Port forward already running for port %d with PID %d",
+			dbSession.LocalPort, dbSession.Pid)
+	}
 	if session.ForwardTunnel && session.LocalPort < 0 {
 		session.LocalPort, err = freeport.GetFreePort()
 		if err != nil {
@@ -588,7 +659,7 @@ func createTunnel(session Session) error {
 			err = startReverseTunnel(key, session, response.Message)
 		}
 		log.Warn(err)
-		if session.AutomaticRestart{
+		if session.AutomaticRestart {
 			time.Sleep(10 * time.Second)
 		}
 		session.AutomaticRestart = true

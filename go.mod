@@ -3,8 +3,11 @@ module github.com/openportio/openport-go
 go 1.14
 
 require (
+	github.com/go-openapi/strfmt v0.19.5 // indirect
 	github.com/gorilla/mux v1.7.4
+	github.com/jedib0t/go-pretty v4.3.0+incompatible // indirect
 	github.com/jinzhu/gorm v1.9.12
+	github.com/mattn/go-runewidth v0.0.9 // indirect
 	github.com/onrik/logrus v0.5.1
 	github.com/orandin/lumberjackrus v1.0.1
 	github.com/phayes/freeport v0.0.0-20180830031419-95f893ade6f2
