@@ -18,6 +18,7 @@ COPY go.mod \
     go.sum \
     /apps/go/
 RUN go mod download
+RUN apt-get install -y curl
 
 COPY main.go /apps/go/
 

@@ -403,7 +403,7 @@ func listSessions() {
 			sessionIsLive(session),
 			session.RestartCommand != "",
 			session.ForwardTunnel,
-			})
+		})
 	}
 	tw.Render()
 }
@@ -634,7 +634,7 @@ func createTunnel(session Session) error {
 	}
 	initDB()
 	dbSession := enrichSessionWithHistory(&session)
-	if dbSession.ID > 0 && sessionIsLive(dbSession){
+	if dbSession.ID > 0 && sessionIsLive(dbSession) {
 		log.Fatalf("Port forward already running for port %d with PID %d",
 			dbSession.LocalPort, dbSession.Pid)
 	}
@@ -666,12 +666,26 @@ func createTunnel(session Session) error {
 	}
 }
 
-func requestPortForward(session *Session, publicKey []byte) (PortResponse, error) {
-	if session.Proxy != "" {
+func getHttpClient(session *Session) http.Client {
+	if session.Proxy == "" {
+		return http.Client{}
+	} else {
 		p := strings.Replace(session.Proxy, "socks5h", "socks5", 1)
-		os.Setenv("HTTPS_PROXY", p)
-		os.Setenv("HTTP_PROXY", p)
+		u, err := url.Parse(p)
+		if err != nil {
+			log.Fatalf("Could not parse proxy: %s", session.Proxy)
+		}
+		tr := &http.Transport{
+			Proxy: http.ProxyURL(u),
+		}
+		return http.Client{
+			Transport: tr,
+		}
 	}
+}
+
+func requestPortForward(session *Session, publicKey []byte) (PortResponse, error) {
+	httpClient := getHttpClient(session)
 
 	postUrl := fmt.Sprintf("%s/api/v1/request-port", session.Server)
 	getParameters := url.Values{
@@ -694,7 +708,7 @@ func requestPortForward(session *Session, publicKey []byte) (PortResponse, error
 		getParameters["ip_link_protection"] = []string{"True"}
 	}
 	log.Debugf("parameters: %s", getParameters)
-	resp, err := http.PostForm(postUrl, getParameters)
+	resp, err := httpClient.PostForm(postUrl, getParameters)
 	if err != nil {
 		log.Fatalf("Error communicating with %s: %s", session.Server, err)
 	}
@@ -815,10 +829,10 @@ func connect(key ssh.Signer, session Session) (*ssh.Client, chan bool, error) {
 		if err != nil {
 			log.Fatalf("Could not parse proxy server: %s", err)
 		}
-		var proxyAuth proxy.Auth
+		var proxyAuth *proxy.Auth = nil
 		proxyPassword, proxyPasswordSet := u.User.Password()
 		if proxyPasswordSet {
-			proxyAuth = proxy.Auth{
+			proxyAuth = &proxy.Auth{
 				User:     u.User.Username(),
 				Password: proxyPassword,
 			}
@@ -831,7 +845,7 @@ func connect(key ssh.Signer, session Session) (*ssh.Client, chan bool, error) {
 		proxyServer := fmt.Sprintf("%s:%s", u.Hostname(), proxyPort)
 		log.Debug("proxy Server: ", proxyServer)
 
-		proxyDialer, err := proxy.SOCKS5("tcp", proxyServer, &proxyAuth, proxy.Direct)
+		proxyDialer, err := proxy.SOCKS5("tcp", proxyServer, proxyAuth, proxy.Direct)
 		if err != nil {
 			log.Warnf("can't connect to the proxy: %s", err)
 			return nil, nil, err
