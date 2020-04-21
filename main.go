@@ -77,6 +77,11 @@ type PortResponse struct {
 	FatalError            bool    `json:"fatal_error"`
 }
 
+type RegisterKeyResponse struct {
+	Status string `json:"status"`
+	Error string `json:"error"`
+}
+
 type ServerResponseError struct {
 	error string
 }
@@ -188,9 +193,6 @@ func main() {
 
 	flag.NewFlagSet("version", flag.ExitOnError)
 
-	registerKeyCmd := flag.NewFlagSet("register-key", flag.ExitOnError)
-	keyName := registerKeyCmd.String("name", "", "The name for this client.")
-
 	killFlagSet := flag.NewFlagSet("kill", flag.ExitOnError)
 	killFlagSet.StringVar(&dbPath, "database", OPENPORT_DB_PATH, "Database file")
 	killFlagSet.BoolVar(&verbose, "verbose", false, "Verbose logging")
@@ -207,6 +209,13 @@ func main() {
 	listFlagSet.StringVar(&dbPath, "database", OPENPORT_DB_PATH, "Database file")
 	listFlagSet.BoolVar(&verbose, "verbose", false, "Verbose logging")
 
+	registerKeyFlagSet := flag.NewFlagSet("register-key", flag.ExitOnError)
+	registerKeyFlagSet.BoolVar(&verbose, "verbose", false, "Verbose logging")
+	registerKeyFlagSet.StringVar(&server, "server", "https://openport.io", "The server to connect to.")
+	registerKeyFlagSet.StringVar(&socksProxy, "proxy", "", "Socks5 proxy to use. Format: socks5://user:pass@host:port")
+	registerKeyToken := registerKeyFlagSet.String("token", "", "Token to link your machine to your account. Find this token at https://openport.io/user/keys .")
+	registerKeyName := registerKeyFlagSet.String("name", "", "The name for this machine.")
+
 	flag.Usage = myUsage
 
 	if len(os.Args) == 1 {
@@ -219,18 +228,21 @@ func main() {
 		flag.Usage()
 		os.Exit(0)
 	case "register-key":
-		registerKeyCmd.Parse(os.Args[2:])
+		_ = registerKeyFlagSet.Parse(os.Args[2:])
 		initLogging()
-		ensureKeysExist()
-		tail := defaultFlagSet.Args()
-		token := tail[0]
-		log.Debugf(*keyName)
-		log.Debugf(token)
-		// TODO!!
+		tail := registerKeyFlagSet.Args()
+		if *registerKeyToken == "" {
+			if len(tail) == 0 {
+				log.Fatalf("--token is required")
+			} else {
+				registerKeyToken = &tail[0]
+			}
+		}
+		registerKey(*registerKeyToken, *registerKeyName, socksProxy, server)
 	case "version":
 		fmt.Println(VERSION)
 	case "kill":
-		killFlagSet.Parse(os.Args[2:])
+		_ = killFlagSet.Parse(os.Args[2:])
 		initLogging()
 		ensureHomeFolderExists()
 		tail := killFlagSet.Args()
@@ -258,18 +270,18 @@ func main() {
 		}
 		log.Debug(resp)
 	case "kill-all":
-		killAllFlagSet.Parse(os.Args[2:])
+		_ = killAllFlagSet.Parse(os.Args[2:])
 		initLogging()
 		ensureHomeFolderExists()
 		initDB()
 		killAll()
 	case "restart-shares":
-		restartSharesFlagSet.Parse(os.Args[2:])
+		_ = restartSharesFlagSet.Parse(os.Args[2:])
 		initLogging()
 		ensureHomeFolderExists()
 		restartShares()
 	case "list":
-		listFlagSet.Parse(os.Args[2:])
+		_ = listFlagSet.Parse(os.Args[2:])
 		initLogging()
 		ensureHomeFolderExists()
 		initDB()
@@ -280,7 +292,7 @@ func main() {
 		var sshServer string = "openport.io"
 		var err error
 		if forwardTunnel {
-			defaultFlagSet.Parse(os.Args[2:])
+			_ = defaultFlagSet.Parse(os.Args[2:])
 			remotePortInt, err = strconv.Atoi(remotePort)
 			if err != nil {
 				parsed, err := url.Parse(remotePort)
@@ -302,7 +314,7 @@ func main() {
 			}
 
 		} else {
-			defaultFlagSet.Parse(os.Args[1:])
+			_ = defaultFlagSet.Parse(os.Args[1:])
 			remotePortInt, err = strconv.Atoi(remotePort)
 			if err != nil {
 				log.Fatalf("Remote port needs to be an integer: %s %s", remotePort, err)
@@ -351,9 +363,47 @@ func main() {
 	}
 
 	/*
-	   group.add_argument('--list', '-l', action='store_true', help="List shares and exit.")
 	   parser.add_argument('--daemonize', '-d', action='store_true', help='Start the app in the background.')
 	*/
+}
+
+func registerKey(keyBindingToken string, name string, proxy string, server string) {
+	ensureHomeFolderExists()
+	publicKey, _, err := ensureKeysExist()
+	if err != nil {
+		log.Fatalf("Could not get key: %s", err)
+	}
+
+	httpClient := getHttpClient(proxy)
+	postUrl := fmt.Sprintf("%s/linkKey", server)
+	getParameters := url.Values{
+		"public_key":        {string(publicKey)},
+		"key_binding_token": {keyBindingToken},
+		"key_name":          {name},
+		"client_version":    {VERSION},
+		"platform":          {runtime.GOOS},
+	}
+	log.Debugf("parameters: %s", getParameters)
+	resp, err := httpClient.PostForm(postUrl, getParameters)
+	if err != nil {
+		log.Fatalf("HTTP error: %s", err)
+	}
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalf("Body error: %s", err)
+	}
+	log.Debugf(string(body))
+	var jsonData = []byte(body)
+	response := RegisterKeyResponse{}
+	jsonErr := json.Unmarshal(jsonData, &response)
+	if jsonErr != nil {
+		log.Fatalf("Json Decode error: %s", err)
+	}
+	if response.Status != "ok" {
+		log.Fatalf("Could not register key: %s", response.Error)
+	} else {
+		log.Info("key successfully registered")
+	}
 }
 
 func sessionIsLive(session Session) bool {
@@ -626,7 +676,7 @@ func handleSignals(session Session) {
 	}()
 }
 
-func createTunnel(session Session) error {
+func createTunnel(session Session) {
 	handleSignals(session)
 	publicKey, key, err := ensureKeysExist()
 	if err != nil {
@@ -666,14 +716,14 @@ func createTunnel(session Session) error {
 	}
 }
 
-func getHttpClient(session *Session) http.Client {
-	if session.Proxy == "" {
+func getHttpClient(proxy string) http.Client {
+	if proxy == "" {
 		return http.Client{}
 	} else {
-		p := strings.Replace(session.Proxy, "socks5h", "socks5", 1)
+		p := strings.Replace(proxy, "socks5h", "socks5", 1)
 		u, err := url.Parse(p)
 		if err != nil {
-			log.Fatalf("Could not parse proxy: %s", session.Proxy)
+			log.Fatalf("Could not parse proxy: %s", proxy)
 		}
 		tr := &http.Transport{
 			Proxy: http.ProxyURL(u),
@@ -685,13 +735,13 @@ func getHttpClient(session *Session) http.Client {
 }
 
 func requestPortForward(session *Session, publicKey []byte) (PortResponse, error) {
-	httpClient := getHttpClient(session)
+	httpClient := getHttpClient(session.Proxy)
 
 	postUrl := fmt.Sprintf("%s/api/v1/request-port", session.Server)
 	getParameters := url.Values{
 		"public_key":            {string(publicKey)},
 		"request_port":          {strconv.Itoa(session.RemotePort)},
-		"client_version":        {"2.0.0"},
+		"client_version":        {VERSION},
 		"restart_session_token": {session.SessionToken},
 		"local_port":            {strconv.Itoa(session.LocalPort)},
 		"http_forward":          {strconv.FormatBool(session.HttpForward)},
