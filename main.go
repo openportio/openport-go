@@ -79,7 +79,7 @@ type PortResponse struct {
 
 type RegisterKeyResponse struct {
 	Status string `json:"status"`
-	Error string `json:"error"`
+	Error  string `json:"error"`
 }
 
 type ServerResponseError struct {
@@ -91,12 +91,12 @@ func (s ServerResponseError) Error() string {
 }
 
 func myUsage() {
-	fmt.Printf("Usage: %s [OPTIONS] argument ...\n", os.Args[0])
-	flag.PrintDefaults()
+	fmt.Printf("Usage: %s (<port> | forward | list | restart-shares | kill <port> | kill-all | register | help [command] | version) [arguments]\n", os.Args[0])
 }
 
 var stdOutLogHook writer.Hook
-var verbose bool
+var verbose bool = false
+var flagSets = make(map[string]*flag.FlagSet)
 
 func initLogging() {
 	log.SetLevel(log.DebugLevel)
@@ -154,7 +154,6 @@ func initLogging() {
 }
 
 func main() {
-	defaultFlagSet := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	var port int
 	var controlPort int
 	var server string
@@ -163,58 +162,76 @@ func main() {
 	var socksProxy string
 	var remotePort string
 
+	addVerboseFlag := func(set *flag.FlagSet) {
+		set.BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
+	}
+
+	addDatabaseFlag := func(set *flag.FlagSet) {
+		set.StringVar(&dbPath, "database", OPENPORT_DB_PATH, "Database file")
+		set.MarkHidden("database")
+	}
+
+	addServerFlag := func(set *flag.FlagSet) {
+		set.StringVar(&server, "server", "https://openport.io", "The server to connect to.")
+		set.MarkHidden("server")
+	}
+
 	addSharedFlags := func(set *flag.FlagSet) {
 		set.IntVar(&port, "port", -1, "The local port you want to expose.")
 		set.IntVar(&port, "local-port", -1, "The local port you want to expose.")
 		set.StringVar(&remotePort, "remote-port", "-1", "The remote port on the server. [openport.io:1234]")
 		set.IntVar(&controlPort, "listener-port", -1, "")
-		set.StringVar(&server, "server", "https://openport.io", "The server to connect to.")
-		set.BoolVar(&verbose, "verbose", false, "Verbose logging")
-		set.StringVar(&dbPath, "database", OPENPORT_HOME+"/openport.db", "Database file")
-		set.BoolVar(&restartOnReboot, "restart-on-reboot", false, "Restart this share when 'restart-shares' is called (on boot for example).")
+		set.BoolVarP(&restartOnReboot, "restart-on-reboot", "R", false, "Restart this share when 'restart-shares' is called (on boot for example).")
 		set.IntVar(&keepAliveSeconds, "keep-alive", 120, "The interval in between keep-alive messages in seconds.")
 		set.StringVar(&socksProxy, "proxy", "", "Socks5 proxy to use. Format: socks5://user:pass@host:port")
-
-		set.MarkHidden("database")
-		set.MarkHidden("server")
+		addVerboseFlag(set)
+		addDatabaseFlag(set)
+		addServerFlag(set)
 		set.MarkHidden("listener-port")
 	}
 
+	defaultFlagSet := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	addSharedFlags(defaultFlagSet)
-
 	ipLinkProtection := defaultFlagSet.String("ip-link-protection", "",
-		"Set to True or False to set if you want users to click a secret link before they can "+
-			"access this port. This overwrites the standard setting in your profile for this "+
-			"session. choices=[True, False]")
+		"Lets users click a secret link before they can "+
+			"access this port. This overwrites the setting in your profile. choices=[True, False]")
 	httpForward := defaultFlagSet.Bool("http-forward", false, "Request an http forward, so you can connect to port 80 on the server.")
-
 	forwardTunnelFlagSet := flag.NewFlagSet("forward", flag.ExitOnError)
 	addSharedFlags(forwardTunnelFlagSet)
+	flagSets[""] = defaultFlagSet
+	flagSets["forward"] = forwardTunnelFlagSet
 
-	flag.NewFlagSet("version", flag.ExitOnError)
+	versionFlagSet := flag.NewFlagSet("version", flag.ExitOnError)
+	flagSets["version"] = versionFlagSet
 
 	killFlagSet := flag.NewFlagSet("kill", flag.ExitOnError)
-	killFlagSet.StringVar(&dbPath, "database", OPENPORT_DB_PATH, "Database file")
-	killFlagSet.BoolVar(&verbose, "verbose", false, "Verbose logging")
+	addVerboseFlag(killFlagSet)
+	addDatabaseFlag(killFlagSet)
+	killFlagSet.IntVar(&port, "port", -1, "The local port of the session to kill.")
+	flagSets["kill"] = killFlagSet
 
 	killAllFlagSet := flag.NewFlagSet("kill-all", flag.ExitOnError)
-	killAllFlagSet.StringVar(&dbPath, "database", OPENPORT_DB_PATH, "Database file")
-	killAllFlagSet.BoolVar(&verbose, "verbose", false, "Verbose logging")
+	addVerboseFlag(killAllFlagSet)
+	addDatabaseFlag(killAllFlagSet)
+	flagSets["kill-all"] = killAllFlagSet
 
 	restartSharesFlagSet := flag.NewFlagSet("restart-shares", flag.ExitOnError)
-	restartSharesFlagSet.StringVar(&dbPath, "database", OPENPORT_DB_PATH, "Database file")
-	restartSharesFlagSet.BoolVar(&verbose, "verbose", false, "Verbose logging")
+	addVerboseFlag(restartSharesFlagSet)
+	addDatabaseFlag(restartSharesFlagSet)
+	flagSets["restart-shares"] = forwardTunnelFlagSet
 
 	listFlagSet := flag.NewFlagSet("list", flag.ExitOnError)
-	listFlagSet.StringVar(&dbPath, "database", OPENPORT_DB_PATH, "Database file")
-	listFlagSet.BoolVar(&verbose, "verbose", false, "Verbose logging")
+	addVerboseFlag(listFlagSet)
+	addDatabaseFlag(listFlagSet)
+	flagSets["list"] = listFlagSet
 
 	registerKeyFlagSet := flag.NewFlagSet("register-key", flag.ExitOnError)
-	registerKeyFlagSet.BoolVar(&verbose, "verbose", false, "Verbose logging")
-	registerKeyFlagSet.StringVar(&server, "server", "https://openport.io", "The server to connect to.")
+	addVerboseFlag(registerKeyFlagSet)
+	addServerFlag(registerKeyFlagSet)
 	registerKeyFlagSet.StringVar(&socksProxy, "proxy", "", "Socks5 proxy to use. Format: socks5://user:pass@host:port")
 	registerKeyToken := registerKeyFlagSet.String("token", "", "Token to link your machine to your account. Find this token at https://openport.io/user/keys .")
 	registerKeyName := registerKeyFlagSet.String("name", "", "The name for this machine.")
+	flagSets["register-key"] = registerKeyFlagSet
 
 	flag.Usage = myUsage
 
@@ -225,7 +242,21 @@ func main() {
 
 	switch os.Args[1] {
 	case "help":
-		flag.Usage()
+		if len(os.Args) > 2 {
+			command := os.Args[2]
+			flagSet := flagSets[command]
+			if flagSet == nil {
+				fmt.Printf("No such command: %s\n", command)
+				myUsage()
+			} else {
+				fmt.Printf("Usage: %s %s [arguments]\n", os.Args[0], command)
+				flagSet.PrintDefaults()
+			}
+		} else {
+			fmt.Printf("Usage: %s (<port> | forward | list | kill | kill-all | register | help )\n", os.Args[0])
+			fmt.Printf("Default: %s <port> [arguments]\n", os.Args[0])
+			defaultFlagSet.PrintDefaults()
+		}
 		os.Exit(0)
 	case "register-key":
 		_ = registerKeyFlagSet.Parse(os.Args[2:])
@@ -246,16 +277,20 @@ func main() {
 		initLogging()
 		ensureHomeFolderExists()
 		tail := killFlagSet.Args()
-		if len(tail) == 0 {
-			log.Fatal("port missing")
-		}
 		var err error
-		port, err = strconv.Atoi(tail[0])
-		if err != nil {
-			log.Warnf("%s --- %s", tail, err)
-			flag.Usage()
-			os.Exit(6)
+		if port == -1 {
+			if len(tail) == 0 {
+				log.Fatal("port missing")
+			} else {
+				port, err = strconv.Atoi(tail[0])
+				if err != nil {
+					log.Warnf("failing: %s %s", tail, err)
+					killFlagSet.PrintDefaults()
+					os.Exit(3)
+				}
+			}
 		}
+
 		initDB()
 		session, err2 := get_session(port)
 		if err2 != nil {
@@ -334,8 +369,7 @@ func main() {
 				port, err = strconv.Atoi(tail[0])
 				if err != nil {
 					log.Warnf("failing: %s %s", tail, err)
-
-					flag.Usage()
+					defaultFlagSet.PrintDefaults()
 					os.Exit(3)
 				}
 			}
@@ -750,8 +784,8 @@ func requestPortForward(session *Session, publicKey []byte) (PortResponse, error
 		"ssh_server":            {session.SshServer},
 		"automatic_restart":     {strconv.FormatBool(session.AutomaticRestart)},
 	}
-	switch session.OpenPortForIpLink {
-	case "True", "False":
+	switch strings.ToLower(session.OpenPortForIpLink) {
+	case "true", "false":
 		getParameters["ip_link_protection"] = []string{session.OpenPortForIpLink}
 	case "":
 	default:
