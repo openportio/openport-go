@@ -161,6 +161,7 @@ func main() {
 	var keepAliveSeconds int
 	var socksProxy string
 	var remotePort string
+	var daemonize bool
 
 	addVerboseFlag := func(set *flag.FlagSet) {
 		set.BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
@@ -184,6 +185,7 @@ func main() {
 		set.BoolVarP(&restartOnReboot, "restart-on-reboot", "R", false, "Restart this share when 'restart-shares' is called (on boot for example).")
 		set.IntVar(&keepAliveSeconds, "keep-alive", 120, "The interval in between keep-alive messages in seconds.")
 		set.StringVar(&socksProxy, "proxy", "", "Socks5 proxy to use. Format: socks5://user:pass@host:port")
+		set.BoolVarP(&daemonize, "daemonize", "d", false, "Start the app in the background.")
 		addVerboseFlag(set)
 		addDatabaseFlag(set)
 		addServerFlag(set)
@@ -375,6 +377,11 @@ func main() {
 			}
 		}
 
+		if daemonize {
+			startDaemon()
+			os.Exit(0)
+		}
+
 		session := Session{
 			LocalPort:         port,
 			OpenPortForIpLink: *ipLinkProtection,
@@ -395,10 +402,36 @@ func main() {
 		}
 		createTunnel(session)
 	}
+}
 
-	/*
-	   parser.add_argument('--daemonize', '-d', action='store_true', help='Start the app in the background.')
-	*/
+func startDaemon() {
+	loc := Find(os.Args, "-d")
+	var command []string
+	if loc <0 {
+		loc = Find(os.Args, "--daemonize")
+	}
+	if loc >= 0 && len(os.Args) > 1{
+		command = append(os.Args[:loc], os.Args[loc+1:]...)
+	} else {
+		log.Debugf("%s", os.Args)
+		log.Fatalf("Use -d or --daemonize to start in the background")
+	}
+	cmd := exec.Command(command[0], command[1:]...)
+	err := cmd.Start()
+	if err != nil {
+		log.Fatal(err)
+	} else {
+		log.Info("Process started in background")
+	}
+}
+
+func Find(a []string, x string) int {
+	for i, n := range a {
+		if x == n {
+			return i
+		}
+	}
+	return -1
 }
 
 func registerKey(keyBindingToken string, name string, proxy string, server string) {
