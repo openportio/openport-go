@@ -407,10 +407,10 @@ func main() {
 func startDaemon() {
 	loc := Find(os.Args, "-d")
 	var command []string
-	if loc <0 {
+	if loc < 0 {
 		loc = Find(os.Args, "--daemonize")
 	}
-	if loc >= 0 && len(os.Args) > 1{
+	if loc >= 0 && len(os.Args) > 1 {
 		command = append(os.Args[:loc], os.Args[loc+1:]...)
 	} else {
 		log.Debugf("%s", os.Args)
@@ -979,7 +979,7 @@ func connect(key ssh.Signer, session Session) (*ssh.Client, chan bool, error) {
 	} else {
 		sshClient, err = ssh.Dial("tcp", sshAddress, config)
 		if err != nil {
-			panic("Failed to dial: " + err.Error())
+			return nil, nil, err
 		}
 	}
 
@@ -1085,7 +1085,7 @@ type Session struct {
 
 	KeepAliveSeconds int
 	Proxy            string
-	ForwardTunnel    bool
+	ForwardTunnel    bool `sql:"default:false"`
 
 	AutomaticRestart bool `gorm:"-"`
 }
