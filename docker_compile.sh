@@ -2,7 +2,7 @@
 set -ex
 cd "$(dirname "$0")"
 
-docker build . -t openport-client-go
-#docker run -it openport-client-go ./openport 22
+ARCH=${1:-amd64}
 
-docker-compose -f /Users/jan/swprojects/openport-client/docker-compose/proxy-test.yaml run openport-go bash
+docker build . -f Dockerfile-$ARCH -t openport-go-$ARCH
+docker run -it -v $(pwd):/tmp openport-go-$ARCH cp openport-$ARCH /tmp

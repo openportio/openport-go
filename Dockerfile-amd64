@@ -22,4 +22,4 @@ RUN apt-get install -y curl
 
 COPY main.go /apps/go/
 
-RUN go build -o openport main.go
+RUN go build -o openport-amd64 main.go
