@@ -49,6 +49,8 @@ var OPENPORT_LOG_PATH = OPENPORT_HOME + "/openport.log"
 var SSH_PRIVATE_KEY_PATH = HOMEDIR + "/.ssh/id_rsa"
 var SSH_PUBLIC_KEY_PATH = HOMEDIR + "/.ssh/id_rsa.pub"
 
+var USER_CONFIG_FILE = "/etc/openport/users.conf"
+
 func getHomeDir() string {
 	currentUser, err := user.Current()
 	if err != nil {
@@ -476,7 +478,7 @@ func registerKey(keyBindingToken string, name string, proxy string, server strin
 func sessionIsLive(session Session) bool {
 	url := fmt.Sprintf("http://127.0.0.1:%d/info", session.AppManagementPort)
 	log.Debug(url)
-	resp, err := http.Get(url)
+	resp, err := http.Get(url)  // TODO: timeout
 	if err != nil {
 		log.Debugf("Error while requesting %s: %s", url, err)
 		return false
@@ -615,8 +617,8 @@ func ensureKeysExist() ([]byte, ssh.Signer, error) {
 						return createKeys()
 					}
 
-					pub_buf, err := ioutil.ReadFile(SSH_PUBLIC_KEY_PATH)
-					err = ioutil.WriteFile(OPENPORT_PUBLIC_KEY_PATH, pub_buf, 0600)
+					pubBuf, err := ioutil.ReadFile(SSH_PUBLIC_KEY_PATH)
+					err = ioutil.WriteFile(OPENPORT_PUBLIC_KEY_PATH, pubBuf, 0600)
 					if err != nil {
 						log.Warn(err)
 						return createKeys()
@@ -642,6 +644,42 @@ func restartShares() {
 			err = cmd.Start()
 			if err != nil {
 				log.Warn(err)
+			}
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	currentUser, err := user.Current()
+	if err != nil {
+		log.Debug(err)
+	}
+	username := currentUser.Username
+	if username != "root" {
+		return
+	}
+
+	buf, err := ioutil.ReadFile(USER_CONFIG_FILE)
+	if err == nil {
+		log.Warnf("Could not read file %s: %s", USER_CONFIG_FILE, err)
+	} else {
+		users := strings.Split(string(buf), "\n")
+
+		for _, username := range users {
+			username = strings.TrimSpace(strings.Split(username, "#")[0])
+			if username == "root" {
+				continue
+			}
+			if username != "" {
+				command := []string{"-u", username, "-H", os.Args[0], "restart-shares"}
+				log.Debugf("Running command sudo %s", command)
+				cmd := exec.Command("sudo", command...)
+				err = cmd.Start()
+				if err != nil {
+					log.Warn(err)
+				}
 			}
 		}
 	}
@@ -726,7 +764,6 @@ func enrichSessionWithHistory(session *Session) Session {
 				session.RemotePort = dbSession.RemotePort
 			}
 		}
-		_ = save(*session)
 		return dbSession
 	}
 	return Session{}
@@ -735,15 +772,59 @@ func enrichSessionWithHistory(session *Session) Session {
 func handleSignals(session Session) {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	restartMessage := ""
+ 	if session.RestartCommand != "" {
+		restartMessage = " Session will not be restarted by \"restart-shares\""
+	}
+
 	go func() {
 		sig := <-sigs
-		log.Infof("Got signal %d. Exiting", sig)
+		log.Infof("Got signal %d. Exiting.%s", sig, restartMessage)
 		setInactive(session)
 		os.Exit(0)
 	}()
 }
 
+func checkUsernameInConfigFile(session Session) {
+	if session.RestartCommand == "" {
+		return
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	currentUser, err := user.Current()
+	if err != nil {
+		log.Debug(err)
+	}
+	username := currentUser.Username
+	if username == "root" {
+		return
+	}
+
+	buf, err := ioutil.ReadFile(USER_CONFIG_FILE)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Warnf("The file %s does not exist. Your sessions will not be automatically restarted " +
+				"on reboot. You can restart your session with \"openport restart-shares\"", USER_CONFIG_FILE)
+		} else if os.IsPermission(err) {
+			log.Warnf("You do not have the rights to read file %s, so we can not verify that your share will be restarted on reboot. " +
+				"You can restart your session with \"openport restart-shares\"", USER_CONFIG_FILE)
+		} else {
+			log.Warnf("Unexpected error when opening file %s : %s", USER_CONFIG_FILE, err)
+		}
+		return
+	}
+	users := strings.Split(string(buf), "\n")
+	if Find (users, username) < 0 {
+		log.Warnf("Your username (%s) is not in %s. Your sessions will not be automatically restarted "+
+			"on reboot. You can restart your session with \"openport restart-shares\"", username, USER_CONFIG_FILE,
+		)
+	}
+}
+
 func createTunnel(session Session) {
+	checkUsernameInConfigFile(session)
 	handleSignals(session)
 	publicKey, key, err := ensureKeysExist()
 	if err != nil {
@@ -760,6 +841,10 @@ func createTunnel(session Session) {
 		if err != nil {
 			log.Fatalf("error getting free port: %s", err)
 		}
+	}
+	err = save(session)
+	if err != nil {
+		log.Warnf("error saving session: %s", err)
 	}
 	for {
 		response, err2 := requestPortForward(&session, publicKey)
@@ -1040,11 +1125,11 @@ func startForwardTunnel(key ssh.Signer, session Session, msg string) error {
 	}
 }
 
-func handleRequestOnForwardTunnel(sshClient *ssh.Client, localConn net.Conn, session Session) error {
+func handleRequestOnForwardTunnel(sshClient *ssh.Client, localConn net.Conn, session Session) {
 	remoteConn, err := sshClient.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", session.RemotePort))
 	if err != nil {
 		log.Errorf("server dial error: %s", err)
-		return err
+		return
 	}
 
 	var closeOnce sync.Once
@@ -1061,7 +1146,7 @@ func handleRequestOnForwardTunnel(sshClient *ssh.Client, localConn net.Conn, ses
 	}
 	go copyConn(localConn, remoteConn)
 	go copyConn(remoteConn, localConn)
-	return nil
+	return
 }
 
 func setInactive(session Session) {
