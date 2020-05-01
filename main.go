@@ -863,6 +863,8 @@ func requestPortForward(session *Session, publicKey []byte) (PortResponse, error
 	session.KeyId = response.KeyId
 	session.HttpForwardAddress = response.HttpForwardAddress
 	session.OpenPortForIpLink = response.OpenPortForIpLink
+	session.FallbackSshServerIp = response.FallbackSshServerIp
+	session.FallbackSshServerPort = response.FallbackSshServerPort
 	err = save(*session)
 
 	if err != nil {
@@ -939,9 +941,9 @@ func connect(key ssh.Signer, session Session) (*ssh.Client, chan bool, error) {
 	var sshClient *ssh.Client
 	var err error
 	sshAddress := fmt.Sprintf("%s:%d", session.SshServer, 22)
+	fallbackSshAddres := fmt.Sprintf("%s:%d", session.FallbackSshServerIp, session.FallbackSshServerPort)
 	if session.Proxy != "" {
 		// create a socks5 dialer
-
 		u, err := url.Parse(session.Proxy)
 		if err != nil {
 			log.Fatalf("Could not parse proxy server: %s", err)
@@ -969,7 +971,12 @@ func connect(key ssh.Signer, session Session) (*ssh.Client, chan bool, error) {
 		}
 		conn, err := proxyDialer.Dial("tcp", sshAddress)
 		if err != nil {
-			return nil, nil, err
+			log.Debugf("%s -> falling back to %s", err, fallbackSshAddres)
+			sshAddress = fallbackSshAddres
+			conn, err = proxyDialer.Dial("tcp", sshAddress)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 		c, chans, reqs, err := ssh.NewClientConn(conn, sshAddress, config)
 		if err != nil {
@@ -979,7 +986,12 @@ func connect(key ssh.Signer, session Session) (*ssh.Client, chan bool, error) {
 	} else {
 		sshClient, err = ssh.Dial("tcp", sshAddress, config)
 		if err != nil {
-			return nil, nil, err
+			log.Debugf("%s -> falling back to %s", err, fallbackSshAddres)
+			sshAddress = fallbackSshAddres
+			sshClient, err = ssh.Dial("tcp", sshAddress, config)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 
@@ -1087,7 +1099,9 @@ type Session struct {
 	Proxy            string
 	ForwardTunnel    bool `sql:"default:false"`
 
-	AutomaticRestart bool `gorm:"-"`
+	FallbackSshServerIp   string `gorm:"-"`
+	FallbackSshServerPort int    `gorm:"-"`
+	AutomaticRestart      bool   `gorm:"-"`
 }
 
 func initDB() {
