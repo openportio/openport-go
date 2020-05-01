@@ -93,7 +93,7 @@ func (s ServerResponseError) Error() string {
 }
 
 func myUsage() {
-	fmt.Printf("Usage: %s (<port> | forward | list | restart-shares | kill <port> | kill-all | register | help [command] | version) [arguments]\n", os.Args[0])
+	fmt.Printf("Usage: %s (<port> | forward | list | restart-sessions | kill <port> | kill-all | register | help [command] | version) [arguments]\n", os.Args[0])
 }
 
 var stdOutLogHook writer.Hook
@@ -184,7 +184,7 @@ func main() {
 		set.IntVar(&port, "local-port", -1, "The local port you want to expose.")
 		set.StringVar(&remotePort, "remote-port", "-1", "The remote port on the server. [openport.io:1234]")
 		set.IntVar(&controlPort, "listener-port", -1, "")
-		set.BoolVarP(&restartOnReboot, "restart-on-reboot", "R", false, "Restart this share when 'restart-shares' is called (on boot for example).")
+		set.BoolVarP(&restartOnReboot, "restart-on-reboot", "R", false, "Restart this session when 'restart-sessions' is called (on boot for example).")
 		set.IntVar(&keepAliveSeconds, "keep-alive", 120, "The interval in between keep-alive messages in seconds.")
 		set.StringVar(&socksProxy, "proxy", "", "Socks5 proxy to use. Format: socks5://user:pass@host:port")
 		set.BoolVarP(&daemonize, "daemonize", "d", false, "Start the app in the background.")
@@ -219,10 +219,10 @@ func main() {
 	addDatabaseFlag(killAllFlagSet)
 	flagSets["kill-all"] = killAllFlagSet
 
-	restartSharesFlagSet := flag.NewFlagSet("restart-shares", flag.ExitOnError)
-	addVerboseFlag(restartSharesFlagSet)
-	addDatabaseFlag(restartSharesFlagSet)
-	flagSets["restart-shares"] = forwardTunnelFlagSet
+	restartSessionsFlagSet := flag.NewFlagSet("restart-sessions", flag.ExitOnError)
+	addVerboseFlag(restartSessionsFlagSet)
+	addDatabaseFlag(restartSessionsFlagSet)
+	flagSets["restart-sessions"] = forwardTunnelFlagSet
 
 	listFlagSet := flag.NewFlagSet("list", flag.ExitOnError)
 	addVerboseFlag(listFlagSet)
@@ -314,11 +314,11 @@ func main() {
 		ensureHomeFolderExists()
 		initDB()
 		killAll()
-	case "restart-shares":
-		_ = restartSharesFlagSet.Parse(os.Args[2:])
+	case "restart-sessions":
+		_ = restartSessionsFlagSet.Parse(os.Args[2:])
 		initLogging()
 		ensureHomeFolderExists()
-		restartShares()
+		restartSessions()
 	case "list":
 		_ = listFlagSet.Parse(os.Args[2:])
 		initLogging()
@@ -632,7 +632,7 @@ func ensureKeysExist() ([]byte, ssh.Signer, error) {
 	}
 }
 
-func restartShares() {
+func restartSessions() {
 	sessions, err := getAllActive()
 	if err != nil {
 		panic(err)
@@ -673,7 +673,7 @@ func restartShares() {
 				continue
 			}
 			if username != "" {
-				command := []string{"-u", username, "-H", os.Args[0], "restart-shares"}
+				command := []string{"-u", username, "-H", os.Args[0], "restart-sessions"}
 				log.Debugf("Running command sudo %s", command)
 				cmd := exec.Command("sudo", command...)
 				err = cmd.Start()
@@ -774,7 +774,7 @@ func handleSignals(session Session) {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	restartMessage := ""
  	if session.RestartCommand != "" {
-		restartMessage = " Session will not be restarted by \"restart-shares\""
+		restartMessage = " Session will not be restarted by \"restart-sessions\""
 	}
 
 	go func() {
@@ -806,10 +806,10 @@ func checkUsernameInConfigFile(session Session) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Warnf("The file %s does not exist. Your sessions will not be automatically restarted " +
-				"on reboot. You can restart your session with \"openport restart-shares\"", USER_CONFIG_FILE)
+				"on reboot. You can restart your session with \"openport restart-sessions\"", USER_CONFIG_FILE)
 		} else if os.IsPermission(err) {
-			log.Warnf("You do not have the rights to read file %s, so we can not verify that your share will be restarted on reboot. " +
-				"You can restart your session with \"openport restart-shares\"", USER_CONFIG_FILE)
+			log.Warnf("You do not have the rights to read file %s, so we can not verify that your session will be restarted on reboot. " +
+				"You can restart your session with \"openport restart-sessions\"", USER_CONFIG_FILE)
 		} else {
 			log.Warnf("Unexpected error when opening file %s : %s", USER_CONFIG_FILE, err)
 		}
@@ -818,7 +818,7 @@ func checkUsernameInConfigFile(session Session) {
 	users := strings.Split(string(buf), "\n")
 	if Find (users, username) < 0 {
 		log.Warnf("Your username (%s) is not in %s. Your sessions will not be automatically restarted "+
-			"on reboot. You can restart your session with \"openport restart-shares\"", username, USER_CONFIG_FILE,
+			"on reboot. You can restart your session with \"openport restart-sessions\"", username, USER_CONFIG_FILE,
 		)
 	}
 }
