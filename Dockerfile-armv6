@@ -1,6 +1,6 @@
 FROM golang:1.14-stretch
 LABEL os=linux
-LABEL arch=armhf
+LABEL arch=armv6
 
 ENV GOOS=linux
 ENV GOARCH=arm
@@ -32,4 +32,4 @@ RUN go mod download
 RUN apt-get install -y curl
 
 COPY main.go /apps/go/
-RUN go build -o openport-armhf main.go
+RUN go build -o openport-armv6 main.go
