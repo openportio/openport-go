@@ -296,7 +296,7 @@ func main() {
 		}
 
 		initDB()
-		session, err2 := get_session(port)
+		session, err2 := getSession(port)
 		if err2 != nil {
 			log.Fatal(err2)
 		}
@@ -740,7 +740,7 @@ func portIsAvailable(port int) bool {
 func enrichSessionWithHistory(session *Session) Session {
 	if session.ForwardTunnel {
 		if session.LocalPort < 0 {
-			dbSession, err := get_forward_session(session.RemotePort, session.SshServer)
+			dbSession, err := getForwardSession(session.RemotePort, session.SshServer)
 			if err != nil {
 				log.Errorf("error fetching session %s", err)
 			} else {
@@ -751,7 +751,7 @@ func enrichSessionWithHistory(session *Session) Session {
 			return dbSession
 		}
 	} else {
-		dbSession, err := get_session(session.LocalPort)
+		dbSession, err := getSession(session.LocalPort)
 		if err != nil {
 			log.Errorf("error fetching session %s", err)
 		} else {
@@ -771,7 +771,7 @@ func enrichSessionWithHistory(session *Session) Session {
 
 func handleSignals(session Session) {
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigs, syscall.SIGINT)
 	restartMessage := ""
  	if session.RestartCommand != "" {
 		restartMessage = " Session will not be restarted by \"restart-sessions\""
@@ -842,10 +842,12 @@ func createTunnel(session Session) {
 			log.Fatalf("error getting free port: %s", err)
 		}
 	}
+	session.Active = true
 	err = save(session)
 	if err != nil {
 		log.Warnf("error saving session: %s", err)
 	}
+	defer setInactive(session)
 	for {
 		response, err2 := requestPortForward(&session, publicKey)
 		if err2 != nil {
@@ -965,9 +967,6 @@ func startReverseTunnel(key ssh.Signer, session Session, message string) error {
 	defer func() { keepAliveDone <- true }()
 
 	log.Debugf("connected")
-	session.Active = true
-	save(session)
-	defer setInactive(session)
 	s := fmt.Sprintf("0.0.0.0:%d", session.RemotePort)
 	addr, err := net.ResolveTCPAddr("tcp", s)
 	if err != nil {
@@ -1202,7 +1201,7 @@ func initDB() {
 	log.Debugf("db created")
 }
 
-func get_forward_session(remote_port int, ssh_server string) (Session, error) {
+func getForwardSession(remote_port int, ssh_server string) (Session, error) {
 	db, err := gorm.Open("sqlite3", dbPath)
 	if err != nil {
 		panic("failed to connect database")
@@ -1217,7 +1216,7 @@ func get_forward_session(remote_port int, ssh_server string) (Session, error) {
 	return session, nil
 }
 
-func get_session(local_port int) (Session, error) {
+func getSession(local_port int) (Session, error) {
 	db, err := gorm.Open("sqlite3", dbPath)
 	if err != nil {
 		panic("failed to connect database")
@@ -1241,9 +1240,9 @@ func save(session Session) error {
 
 	var existingSession Session
 	if session.ForwardTunnel {
-		existingSession, err = get_forward_session(session.RemotePort, session.SshServer)
+		existingSession, err = getForwardSession(session.RemotePort, session.SshServer)
 	} else {
-		existingSession, err = get_session(session.LocalPort)
+		existingSession, err = getSession(session.LocalPort)
 	}
 	if err == nil {
 		session.ID = existingSession.ID
