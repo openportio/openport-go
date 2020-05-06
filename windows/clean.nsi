@@ -4,9 +4,6 @@
 !addincludedir "include"
 !addplugindir "plugins"
 
-;!include "getFQDN.nsi"
-
-
 !define APPNAME "Openport"
 !define INSTDIR "$PROGRAMFILES\${APPNAME}"
 !define OPENPORT_EXE "openport.exe"
@@ -65,14 +62,11 @@ BrandingText "http://www.openport.io/"
 
 Section # hidden section
 	setOutPath $INSTDIR
-;	file /r ..\dist\*.* 
-	file /r ..\dist\openport\*.* 
-	file /r ..\dist\openportw\*.* 
-;	file /r ..\dist\openport-gui\*.*
-	file ..\..\openport-client\openport\resources\logo-base.ico
+	file openport.exe
+	file openportw.exe
+	file images\logo-base.ico
 ;	file ..\..\openport-client\openport\resources\install_windows_service.bat
 ;	file ..\..\openport-client\openport\resources\server.pem
-    file msvcr90.dll
 	#messageBox MB_OK "instdir: $INSTDIR"
 ;	WriteRegStr HKCR "*\shell\${APPNAME}\command" "" "$INSTDIR\${OPENPORT_EXE} $\"%1$\""
 ;	WriteRegStr HKCR "Directory\shell\${APPNAME}\command" "" "$INSTDIR\${OPENPORT_EXE} $\"%1$\""
@@ -84,11 +78,7 @@ Section # hidden section
 	WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "UninstallString" "$INSTDIR\Uninstall.exe"
 	WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "InstallLocation" "$INSTDIR"
 	
-	WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Openport" '"$INSTDIR\openportw.exe"  --restart-shares'
-	
-	
-;	# Start Menu
-;	createShortCut "$SMPROGRAMS\${APPNAME}.lnk" "$INSTDIR\openport-gui.exe" "" "$INSTDIR\logo-base.ico"
+	WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Openport" '"$INSTDIR\openportw.exe" restart-sessions'
 
 	${EnvVarUpdate} $0 "PATH" "A" "HKLM" "$INSTDIR"
 SectionEnd
