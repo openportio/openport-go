@@ -4,7 +4,7 @@ cd $(dirname $0)
 
 MACHINE=$(uname -m)
 DOCKERARGS=
-if [ "$MACHINE" == "armv7l" ] ; then
+if [ "$MACHINE" == armv* ] ; then
 	DOCKERARGS="--build-arg FROMIMAGE=arm32v7/python:3.6.10-stretch"
 	EXTRATAG="-tmp"
 fi

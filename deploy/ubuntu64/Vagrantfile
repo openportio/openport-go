@@ -8,4 +8,9 @@ Vagrant.configure(2) do |config|
       sudo dpkg -i /vagrant/openport*.deb
       openport 22 -R -d
   SHELL
+
+  config.vm.provider "virtualbox" do |v|
+    v.memory = 4096
+    v.cpus = 2
+  end
 end
