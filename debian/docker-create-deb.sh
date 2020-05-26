@@ -1,7 +1,5 @@
 #!/bin/bash
 set -ex
-cd $(dirname $0)
-
-# TODO: move to docker-compose file
-
-docker run -it -v $(pwd)/..:/apps/distribution/ jandebleser/openport-distribution ./debian/docker/create_deb.sh
+cd "$(dirname "$0")"
+docker build -t distribution-debian .
+docker run -it -v "$(pwd)":/app distribution-debian /app/entrypoint.sh

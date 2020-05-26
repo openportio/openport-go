@@ -1,2 +1,2 @@
-update-rc.d openport defaults
-openport --restart-shares
+systemctl enable openport
+openport restart-sessions

@@ -1,12 +1,5 @@
 #!/usr/bin/make -f
 
-override_dh_strip:
-	echo "DO NOT STRIP"
-
-override_dh_shlibdeps:
-	echo "Inside override_dh_shlibdeps"
-	dh_shlibdeps -l usr/lib/openport/
-
 %:
 	echo "RUNNING RULESS!!!"
 	dh $@

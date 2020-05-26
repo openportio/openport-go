@@ -1,7 +1,9 @@
 #!/bin/bash
+set -ex
+cd "$(dirname "$0")"/..
+source client_folder.sh
+cd -
+$CLIENTDIR/docker_compile.sh amd64
+cp $CLIENTDIR/openport-amd64 openport
 
-set -ex 
-cd ../..
-bash -ex create_exes.sh $1
-cd distribution/debian
-bash -ex createdeb.sh $1
+bash -ex docker-create-deb.sh

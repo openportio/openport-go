@@ -1,4 +1,0 @@
-setuptools==45.2.0
-pyinstaller==3.6
-
-#../openport-client/

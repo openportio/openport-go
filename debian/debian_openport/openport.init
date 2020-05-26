@@ -10,7 +10,7 @@
 
 # Author: Jan De Bleser <jan@openport.io>
 
-SCRIPT="/usr/bin/openport --restart-shares"
+SCRIPT="/usr/bin/openport restart-sessions"
 RUNAS=root
 
 PIDFILE=/var/run/openport.pid
