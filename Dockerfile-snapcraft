@@ -1,0 +1,27 @@
+FROM snapcraft-stable
+MAINTAINER JanDeBleser
+
+ENV LANG C.UTF-8
+
+RUN set -ex \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        upx \
+        pkg-config \
+        wget \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV GOVERSION="1.14"
+
+
+# install golang
+RUN set -ex \
+    && wget -P /tmp https://dl.google.com/go/go$GOVERSION.linux-amd64.tar.gz \
+    && tar -C /usr/local -xzf /tmp/go$GOVERSION.linux-amd64.tar.gz
+
+RUN ln -s /usr/local/go/bin/go /usr/bin/
+
+WORKDIR /app
