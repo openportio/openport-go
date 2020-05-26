@@ -222,6 +222,7 @@ func main() {
 	restartSessionsFlagSet := flag.NewFlagSet("restart-sessions", flag.ExitOnError)
 	addVerboseFlag(restartSessionsFlagSet)
 	addDatabaseFlag(restartSessionsFlagSet)
+	restartSessionsFlagSet.BoolVarP(&daemonize, "daemonize", "d", false, "Start the app in the background.")
 	flagSets["restart-sessions"] = forwardTunnelFlagSet
 
 	listFlagSet := flag.NewFlagSet("list", flag.ExitOnError)
@@ -317,6 +318,10 @@ func main() {
 	case "restart-sessions":
 		_ = restartSessionsFlagSet.Parse(os.Args[2:])
 		initLogging()
+		if daemonize {
+			startDaemon()
+			os.Exit(0)
+		}
 		ensureHomeFolderExists()
 		restartSessions()
 	case "list":
