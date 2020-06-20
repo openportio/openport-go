@@ -919,7 +919,8 @@ func requestPortForward(session *Session, publicKey []byte) (PortResponse, error
 	log.Debugf("parameters: %s", getParameters)
 	resp, err := httpClient.PostForm(postUrl, getParameters)
 	if err != nil {
-		log.Fatalf("Error communicating with %s: %s", session.Server, err)
+		log.Errorf("Error communicating with %s: %s", session.Server, err)
+		return PortResponse{}, err
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
