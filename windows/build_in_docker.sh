@@ -14,4 +14,4 @@ docker run -it \
     "-DVERSION=$VERSION" /code/clean.nsi
 
 
-cp Openport_2.0.0.exe ../deploy/windows10
+cp Openport_$VERSION.exe ../deploy/windows10
