@@ -36,7 +36,7 @@ import (
 	"time"
 )
 
-const VERSION = "2.0.0"
+const VERSION = "2.0.1"
 
 var HOMEDIR = getHomeDir()
 
@@ -196,7 +196,7 @@ func main() {
 
 	defaultFlagSet := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	addSharedFlags(defaultFlagSet)
-	ipLinkProtection := defaultFlagSet.String("ip-link-protection", "",
+	useIpLinkProtection := defaultFlagSet.String("ip-link-protection", "",
 		"Lets users click a secret link before they can "+
 			"access this port. This overwrites the setting in your profile. choices=[True, False]")
 	httpForward := defaultFlagSet.Bool("http-forward", false, "Request an http forward, so you can connect to port 80 on the server.")
@@ -390,16 +390,16 @@ func main() {
 		}
 
 		session := Session{
-			LocalPort:         port,
-			OpenPortForIpLink: *ipLinkProtection,
-			HttpForward:       *httpForward,
-			Server:            server,
-			KeepAliveSeconds:  keepAliveSeconds,
-			Proxy:             socksProxy,
-			Active:            true,
-			ForwardTunnel:     forwardTunnel,
-			RemotePort:        remotePortInt,
-			SshServer:         sshServer,
+			LocalPort:           port,
+			UseIpLinkProtection: *useIpLinkProtection,
+			HttpForward:         *httpForward,
+			Server:              server,
+			KeepAliveSeconds:    keepAliveSeconds,
+			Proxy:               socksProxy,
+			Active:              true,
+			ForwardTunnel:       forwardTunnel,
+			RemotePort:          remotePortInt,
+			SshServer:           sshServer,
 		}
 		controlPort := startControlServer(controlPort)
 		session.AppManagementPort = controlPort
@@ -483,7 +483,7 @@ func registerKey(keyBindingToken string, name string, proxy string, server strin
 func sessionIsLive(session Session) bool {
 	url := fmt.Sprintf("http://127.0.0.1:%d/info", session.AppManagementPort)
 	log.Debug(url)
-	resp, err := http.Get(url)  // TODO: timeout
+	resp, err := http.Get(url) // TODO: timeout
 	if err != nil {
 		log.Debugf("Error while requesting %s: %s", url, err)
 		return false
@@ -583,7 +583,7 @@ func readKeys() ([]byte, ssh.Signer, error) {
 func ensureHomeFolderExists() {
 	err := os.Mkdir(OPENPORT_HOME, 0600)
 	if err != nil {
-		if ! os.IsExist(err) {
+		if !os.IsExist(err) {
 			log.Fatal(err)
 		}
 		log.Debug(err)
@@ -778,7 +778,7 @@ func handleSignals(session Session) {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT)
 	restartMessage := ""
- 	if session.RestartCommand != "" {
+	if session.RestartCommand != "" {
 		restartMessage = " Session will not be restarted by \"restart-sessions\""
 	}
 
@@ -810,10 +810,10 @@ func checkUsernameInConfigFile(session Session) {
 	buf, err := ioutil.ReadFile(USER_CONFIG_FILE)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Warnf("The file %s does not exist. Your sessions will not be automatically restarted " +
+			log.Warnf("The file %s does not exist. Your sessions will not be automatically restarted "+
 				"on reboot. You can restart your session with \"openport restart-sessions\"", USER_CONFIG_FILE)
 		} else if os.IsPermission(err) {
-			log.Warnf("You do not have the rights to read file %s, so we can not verify that your session will be restarted on reboot. " +
+			log.Warnf("You do not have the rights to read file %s, so we can not verify that your session will be restarted on reboot. "+
 				"You can restart your session with \"openport restart-sessions\"", USER_CONFIG_FILE)
 		} else {
 			log.Warnf("Unexpected error when opening file %s : %s", USER_CONFIG_FILE, err)
@@ -821,7 +821,7 @@ func checkUsernameInConfigFile(session Session) {
 		return
 	}
 	users := strings.Split(string(buf), "\n")
-	if Find (users, username) < 0 {
+	if Find(users, username) < 0 {
 		log.Warnf("Your username (%s) is not in %s. Your sessions will not be automatically restarted "+
 			"on reboot. You can restart your session with \"openport restart-sessions\"", username, USER_CONFIG_FILE,
 		)
@@ -909,9 +909,9 @@ func requestPortForward(session *Session, publicKey []byte) (PortResponse, error
 		"ssh_server":            {session.SshServer},
 		"automatic_restart":     {strconv.FormatBool(session.AutomaticRestart)},
 	}
-	switch strings.ToLower(session.OpenPortForIpLink) {
+	switch strings.ToLower(session.UseIpLinkProtection) {
 	case "true", "false":
-		getParameters["ip_link_protection"] = []string{session.OpenPortForIpLink}
+		getParameters["ip_link_protection"] = []string{session.UseIpLinkProtection}
 	case "":
 	default:
 		getParameters["ip_link_protection"] = []string{"True"}
@@ -1182,8 +1182,9 @@ type Session struct {
 	HttpForward        bool
 	HttpForwardAddress string
 
-	AppManagementPort int
-	OpenPortForIpLink string
+	AppManagementPort   int
+	OpenPortForIpLink   string
+	UseIpLinkProtection string
 
 	KeepAliveSeconds int
 	Proxy            string
