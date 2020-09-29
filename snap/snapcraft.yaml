@@ -1,0 +1,22 @@
+name: openport
+base: core18 # the base snap is the execution environment for this snap
+version: '2.0.2'
+summary: Forward a port from your PC to the internet
+description: |
+  Open a reverse SSH tunnel from your device to the openport.io servers.
+  See https://openport.io for more information.
+
+grade: devel # must be 'stable' to release into candidate/stable channels
+confinement: devmode # use 'strict' once you have the right plugs and slots
+
+parts:
+  openport:
+    plugin: go
+    go-importpath: github.com/openportio/openport-go
+    source: .
+    source-type: git
+   # build-packages:
+   #   - gcc
+apps:
+  openport:
+    command: bin/openport-go
