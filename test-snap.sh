@@ -1,0 +1,1 @@
+docker run -it -v $(pwd):/app snapcraft-stable bash
