@@ -100,6 +100,10 @@ var stdOutLogHook writer.Hook
 var verbose bool = false
 var flagSets = make(map[string]*flag.FlagSet)
 
+var interProcessHttpClient = http.Client{
+	Timeout: 2 * time.Second,
+}
+
 func initLogging() {
 	log.SetLevel(log.DebugLevel)
 	log.WithField("pid", os.Getpid())
@@ -304,7 +308,7 @@ func main() {
 		if session.ID == 0 {
 			log.Fatal("Session not found.")
 		}
-		resp, err3 := http.Get(fmt.Sprintf("http://127.0.0.1:%d/exit", session.AppManagementPort))
+		resp, err3 := interProcessHttpClient.Get(fmt.Sprintf("http://127.0.0.1:%d/exit", session.AppManagementPort))
 		if err3 != nil {
 			log.Fatalf("Could not kill session: %s", err3)
 		}
@@ -483,7 +487,7 @@ func registerKey(keyBindingToken string, name string, proxy string, server strin
 func sessionIsLive(session Session) bool {
 	url := fmt.Sprintf("http://127.0.0.1:%d/info", session.AppManagementPort)
 	log.Debug(url)
-	resp, err := http.Get(url) // TODO: timeout
+	resp, err := interProcessHttpClient.Get(url)
 	if err != nil {
 		log.Debugf("Error while requesting %s: %s", url, err)
 		return false
@@ -696,7 +700,7 @@ func killAll() {
 		panic(err)
 	}
 	for _, session := range sessions {
-		resp, err3 := http.Get(fmt.Sprintf("http://127.0.0.1:%d/exit", session.AppManagementPort))
+		resp, err3 := interProcessHttpClient.Get(fmt.Sprintf("http://127.0.0.1:%d/exit", session.AppManagementPort))
 		if err3 != nil {
 			session.Active = false
 			save(session)
@@ -889,6 +893,7 @@ func getHttpClient(proxy string) http.Client {
 		}
 		return http.Client{
 			Transport: tr,
+			Timeout: 30 * time.Second,
 		}
 	}
 }
