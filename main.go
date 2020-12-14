@@ -590,7 +590,6 @@ func ensureHomeFolderExists() {
 		if !os.IsExist(err) {
 			log.Fatal(err)
 		}
-		log.Debug(err)
 	} else {
 		log.Debugf("Created directory %s", OPENPORT_HOME)
 	}
