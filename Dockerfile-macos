@@ -1,0 +1,37 @@
+### Does not work yet. Better to use xgo? karalabe/xgo-latest
+
+
+FROM ubuntu:18.04
+MAINTAINER JanDeBleser
+
+ENV LANG C.UTF-8
+
+RUN apt-get update; apt-get install -y software-properties-common
+RUN add-apt-repository ppa:longsleep/golang-backports
+RUN apt-get update && apt-get install -y golang-1.14-go wget curl
+
+RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
+RUN apt-get update
+RUN apt-add-repository "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-6.0 main"
+RUN apt-get install -y clang-6.0 lld-6.0
+
+WORKDIR /apps/go/
+
+ENV PATH=$PATH:/usr/lib/go-1.14/bin
+ENV GOBIN=$GOPATH/bin
+RUN go version
+ENV CC=o64-clang
+ENV CXX=o64-clang++
+ENV GOOS=darwin
+ENV GOARCH=amd64
+ENV CGO_ENABLED=1
+
+COPY go.mod \
+    go.sum \
+    /apps/go/
+
+RUN go mod download
+
+COPY main.go /apps/go/
+
+RUN go build -o openport-macos main.go
