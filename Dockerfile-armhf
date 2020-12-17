@@ -1,0 +1,34 @@
+FROM golang:1.14-stretch
+LABEL os=linux
+LABEL arch=armhf
+
+ENV GOOS=linux
+ENV GOARCH=arm
+ENV GOARM=7
+ENV CGO_ENABLED=1
+ENV CC=arm-linux-gnueabihf-gcc
+ENV PATH="/go/bin/${GOOS}_${GOARCH}:${PATH}"
+ENV PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
+
+# install build & runtime dependencies
+RUN dpkg --add-architecture armhf \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        protobuf-compiler \
+        upx \
+        libc6-dev-armhf-cross \
+   gcc-arm-linux-gnueabihf \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY go.mod \
+    go.sum \
+    /apps/go/
+
+WORKDIR /apps/go/
+
+RUN go mod download
+RUN apt-get install -y curl
+
+COPY main.go /apps/go/
+RUN go build -o openport-armhf main.go
