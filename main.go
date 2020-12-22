@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -86,6 +87,35 @@ type RegisterKeyResponse struct {
 
 type ServerResponseError struct {
 	error string
+}
+
+type IncrementalSleeper struct {
+	SleepTime	time.Duration
+	MaxSleepTime time.Duration
+	InitialSleepTime time.Duration
+}
+
+func (is IncrementalSleeper) increase() {
+	newSleepTime := is.SleepTime * 2
+	if newSleepTime > is.MaxSleepTime {
+		newSleepTime = is.MaxSleepTime
+	}
+	is.SleepTime = newSleepTime
+}
+
+func (is IncrementalSleeper) reset() {
+	is.SleepTime = is.InitialSleepTime
+}
+
+func (is IncrementalSleeper) sleep() {
+	time.Sleep(10 * time.Second)
+	is.increase()
+}
+
+var httpSleeper = IncrementalSleeper{
+	10 * time.Second,
+	300 * time.Second,
+	10 * time.Second,
 }
 
 func (s ServerResponseError) Error() string {
@@ -860,9 +890,11 @@ func createTunnel(session Session) {
 		response, err2 := requestPortForward(&session, publicKey)
 		if err2 != nil {
 			log.Error(err2)
-			time.Sleep(10 * time.Second)
+			log.Infof("Will sleep for %d seconds", httpSleeper.SleepTime.Seconds())
+			httpSleeper.sleep()
 			continue
 		}
+		httpSleeper.reset()
 
 		var err error
 		if session.ForwardTunnel {
@@ -969,6 +1001,7 @@ func requestPortForward(session *Session, publicKey []byte) (PortResponse, error
 	}
 	return response, nil
 }
+
 func startReverseTunnel(key ssh.Signer, session Session, message string) error {
 	sshClient, keepAliveDone, err2 := connect(key, session)
 	if err2 != nil {
