@@ -12,6 +12,7 @@ import (
 	"github.com/jedib0t/go-pretty/table"
 	"github.com/jedib0t/go-pretty/text"
 	"github.com/jinzhu/gorm"
+	"github.com/kisielk/og-rek"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 	"github.com/orandin/lumberjackrus"
 	"github.com/phayes/freeport"
@@ -50,7 +51,8 @@ var OPENPORT_LOG_PATH = OPENPORT_HOME + "/openport.log"
 var SSH_PRIVATE_KEY_PATH = HOMEDIR + "/.ssh/id_rsa"
 var SSH_PUBLIC_KEY_PATH = HOMEDIR + "/.ssh/id_rsa.pub"
 
-var USER_CONFIG_FILE = "/etc/openport/users.conf"
+const USER_CONFIG_FILE = "/etc/openport/users.conf"
+const DEFAULT_SERVER = "https://openport.io"
 
 func getHomeDir() string {
 	currentUser, err := user.Current()
@@ -207,9 +209,13 @@ func main() {
 		set.StringVar(&dbPath, "database", OPENPORT_DB_PATH, "Database file")
 		set.MarkHidden("database")
 	}
+	addLegacyFlag := func(set *flag.FlagSet, name string) {
+		set.String(name, "legacy", "legacy: do not use")
+		set.MarkHidden(name)
+	}
 
 	addServerFlag := func(set *flag.FlagSet) {
-		set.StringVar(&server, "server", "https://openport.io", "The server to connect to.")
+		set.StringVar(&server, "server", DEFAULT_SERVER, "The server to connect to.")
 		set.MarkHidden("server")
 	}
 
@@ -236,6 +242,13 @@ func main() {
 	httpForward := defaultFlagSet.Bool("http-forward", false, "Request an http forward, so you can connect to port 80 on the server.")
 	forwardTunnelFlagSet := flag.NewFlagSet("forward", flag.ExitOnError)
 	addSharedFlags(forwardTunnelFlagSet)
+
+	// Legacy flags
+	addLegacyFlag(defaultFlagSet, "request-port")
+	addLegacyFlag(defaultFlagSet, "request-token")
+	addLegacyFlag(defaultFlagSet, "start-manager")
+	addLegacyFlag(defaultFlagSet, "manager-port")
+
 	flagSets[""] = defaultFlagSet
 	flagSets["forward"] = forwardTunnelFlagSet
 
@@ -256,8 +269,9 @@ func main() {
 	restartSessionsFlagSet := flag.NewFlagSet("restart-sessions", flag.ExitOnError)
 	addVerboseFlag(restartSessionsFlagSet)
 	addDatabaseFlag(restartSessionsFlagSet)
+	addServerFlag(restartSessionsFlagSet)
 	restartSessionsFlagSet.BoolVarP(&daemonize, "daemonize", "d", false, "Start the app in the background.")
-	flagSets["restart-sessions"] = forwardTunnelFlagSet
+	flagSets["restart-sessions"] = restartSessionsFlagSet
 
 	listFlagSet := flag.NewFlagSet("list", flag.ExitOnError)
 	addVerboseFlag(listFlagSet)
@@ -357,7 +371,7 @@ func main() {
 			os.Exit(0)
 		}
 		ensureHomeFolderExists()
-		restartSessions()
+		restartSessions(server, dbPath)
 	case "list":
 		_ = listFlagSet.Parse(os.Args[2:])
 		initLogging()
@@ -670,15 +684,46 @@ func ensureKeysExist() ([]byte, ssh.Signer, error) {
 	}
 }
 
-func restartSessions() {
+func restartSessions(server string, database string) {
+	log.Debug("Restarting Sessions")
 	sessions, err := getAllActive()
 	if err != nil {
 		panic(err)
 	}
 	for _, session := range sessions {
+		log.Debug("Restarting session: ", session.LocalPort)
 		if session.RestartCommand != "" {
-			log.Debugf("Running command %s with args %s", os.Args[0], session.RestartCommand)
-			cmd := exec.Command(os.Args[0], strings.Split(session.RestartCommand, " ")...)
+			restartCommand := strings.Split(session.RestartCommand, " ")
+			if len(restartCommand) > 1 && restartCommand[1][0] != '-' || strings.Contains(restartCommand[0], "\n") {
+				log.Debugf("Migrating from older version: %s", session.RestartCommand)
+				// Python pickle
+				buf := bytes.NewBufferString(session.RestartCommand)
+				dec := ogórek.NewDecoder(buf)
+				unpickled, err := dec.Decode()
+				if err != nil {
+					log.Error(err)
+					log.Warn("Session will not be restarted")
+					continue
+				}
+				log.Debugf("this is unpickled : %s", unpickled)
+				restartCommand = []string{}
+				unpickledInterfaces := unpickled.([]interface{})
+				for _, part := range unpickledInterfaces {
+					restartCommand = append(restartCommand, part.(string))
+				}
+				if strings.Contains(restartCommand[0], "openport"){
+					restartCommand = restartCommand[1:]
+				}
+			}
+
+			if server != DEFAULT_SERVER {
+				restartCommand = append(restartCommand, "--server", server)
+			}
+			if database != OPENPORT_DB_PATH {
+				restartCommand = append(restartCommand, "--database", database)
+			}
+			log.Infof("Running command %s with args %s", os.Args[0], restartCommand)
+			cmd := exec.Command(os.Args[0], restartCommand...)
 			err = cmd.Start()
 			if err != nil {
 				log.Warn(err)
