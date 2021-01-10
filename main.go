@@ -694,7 +694,9 @@ func restartSessions(server string, database string) {
 		log.Debug("Restarting session: ", session.LocalPort)
 		if session.RestartCommand != "" {
 			restartCommand := strings.Split(session.RestartCommand, " ")
-			if len(restartCommand) > 1 && restartCommand[1][0] != '-' || strings.Contains(restartCommand[0], "\n") {
+			if (len(restartCommand) > 1 && restartCommand[1][0] != '-') ||
+				strings.Contains(restartCommand[0], "\n") ||
+				restartCommand[0][0] == 0x80 {
 				log.Debugf("Migrating from older version: %s", session.RestartCommand)
 				// Python pickle
 				buf := bytes.NewBufferString(session.RestartCommand)
@@ -705,11 +707,19 @@ func restartSessions(server string, database string) {
 					log.Warn("Session will not be restarted")
 					continue
 				}
-				log.Debugf("this is unpickled : %s", unpickled)
+				log.Debugf("this is unpickled : <%s>", unpickled)
 				restartCommand = []string{}
-				unpickledInterfaces := unpickled.([]interface{})
-				for _, part := range unpickledInterfaces {
-					restartCommand = append(restartCommand, part.(string))
+				unpickledInterfaces, castWasOk := unpickled.([]interface{})
+				if castWasOk {
+					for _, part := range unpickledInterfaces {
+						restartCommand = append(restartCommand, part.(string))
+					}
+				} else {
+					unpickledString := unpickled.(string)
+					if unpickledString == "" {
+						continue
+					}
+					restartCommand = []string{unpickledString}
 				}
 				if strings.Contains(restartCommand[0], "openport"){
 					restartCommand = restartCommand[1:]
@@ -935,7 +945,7 @@ func createTunnel(session Session) {
 		response, err2 := requestPortForward(&session, publicKey)
 		if err2 != nil {
 			log.Error(err2)
-			log.Infof("Will sleep for %d seconds", httpSleeper.SleepTime.Seconds())
+			log.Infof("Will sleep for %f seconds", httpSleeper.SleepTime.Seconds())
 			httpSleeper.sleep()
 			continue
 		}
