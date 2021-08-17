@@ -93,7 +93,7 @@ func (s ServerResponseError) Error() string {
 }
 
 func myUsage() {
-	fmt.Printf("Usage: %s (<port> | forward | list | restart-sessions | kill <port> | kill-all | register | help [command] | version) [arguments]\n", os.Args[0])
+	fmt.Printf("Usage: %s (<port> | forward | list | restart-sessions | kill <port> | kill-all | register-key | help [command] | version) [arguments]\n", os.Args[0])
 }
 
 var stdOutLogHook writer.Hook
@@ -641,6 +641,7 @@ func ensureKeysExist() ([]byte, ssh.Signer, error) {
 }
 
 func restartSessions() {
+	log.Debug("restartSessions")
 	sessions, err := getAllActive()
 	if err != nil {
 		panic(err)
@@ -892,7 +893,7 @@ func getHttpClient(proxy string) http.Client {
 		}
 		return http.Client{
 			Transport: tr,
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
 		}
 	}
 }
