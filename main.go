@@ -645,7 +645,9 @@ func ensureKeysExist() ([]byte, ssh.Signer, error) {
 		// File exists
 		return readKeys()
 	} else {
-		if _, err := os.Stat(SSH_PRIVATE_KEY_PATH); err == nil {
+		_, err1 := os.Stat(SSH_PRIVATE_KEY_PATH)
+		_, err2 := os.Stat(SSH_PUBLIC_KEY_PATH)
+		if err1 == nil && err2 == nil {
 			// ssh-key exists
 			buf, err := ioutil.ReadFile(SSH_PRIVATE_KEY_PATH)
 			if err != nil {
