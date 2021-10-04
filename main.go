@@ -864,7 +864,7 @@ func enrichSessionWithHistory(session *Session) Session {
 	return Session{}
 }
 
-func handleSignals(session Session) {
+func handleSignals(session *Session) {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT)
 	restartMessage := ""
@@ -875,7 +875,7 @@ func handleSignals(session Session) {
 	go func() {
 		sig := <-sigs
 		log.Infof("Got signal %d. Exiting.%s", sig, restartMessage)
-		setInactive(session)
+		setInactive(*session)
 		os.Exit(0)
 	}()
 }
@@ -920,7 +920,7 @@ func checkUsernameInConfigFile(session Session) {
 
 func createTunnel(session Session) {
 	checkUsernameInConfigFile(session)
-	handleSignals(session)
+	handleSignals(&session)
 	publicKey, key, err := ensureKeysExist()
 	if err != nil {
 		log.Fatalf("Error during fetching/creating key: %s", err)
