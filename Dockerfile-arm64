@@ -12,6 +12,7 @@ ENV PATH="/go/bin/${GOOS}_${GOARCH}:${PATH}"
 # install build & runtime dependencies
 RUN dpkg --add-architecture arm64 \
     && apt-get update \
+    && dpkg --configure -a \
     && apt-get install -y --no-install-recommends \
         protobuf-compiler \
         upx \

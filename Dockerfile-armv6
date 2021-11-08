@@ -12,6 +12,7 @@ ENV PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabi/pkgconfig
 # install build & runtime dependencies
 RUN dpkg --add-architecture arm \
     && apt-get update \
+    && dpkg --configure -a \
     && apt-get install -y --no-install-recommends \
         protobuf-compiler \
         upx \
