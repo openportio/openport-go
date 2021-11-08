@@ -97,7 +97,7 @@ type IncrementalSleeper struct {
 	InitialSleepTime time.Duration
 }
 
-func (is IncrementalSleeper) increase() {
+func (is *IncrementalSleeper) increase() {
 	newSleepTime := is.SleepTime * 2
 	if newSleepTime > is.MaxSleepTime {
 		newSleepTime = is.MaxSleepTime
@@ -105,12 +105,12 @@ func (is IncrementalSleeper) increase() {
 	is.SleepTime = newSleepTime
 }
 
-func (is IncrementalSleeper) reset() {
+func (is *IncrementalSleeper) reset() {
 	is.SleepTime = is.InitialSleepTime
 }
 
-func (is IncrementalSleeper) sleep() {
-	time.Sleep(10 * time.Second)
+func (is *IncrementalSleeper) sleep() {
+	time.Sleep(is.SleepTime)
 	is.increase()
 }
 
