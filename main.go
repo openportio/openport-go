@@ -12,8 +12,8 @@ import (
 	"github.com/jedib0t/go-pretty/table"
 	"github.com/jedib0t/go-pretty/text"
 	"github.com/jinzhu/gorm"
-	"github.com/kisielk/og-rek"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
+	"github.com/kisielk/og-rek"
 	"github.com/orandin/lumberjackrus"
 	"github.com/phayes/freeport"
 	log "github.com/sirupsen/logrus"
@@ -38,7 +38,7 @@ import (
 	"time"
 )
 
-const VERSION = "2.0.3"
+const VERSION = "2.0.4"
 
 var HOMEDIR = getHomeDir()
 
@@ -92,8 +92,8 @@ type ServerResponseError struct {
 }
 
 type IncrementalSleeper struct {
-	SleepTime	time.Duration
-	MaxSleepTime time.Duration
+	SleepTime        time.Duration
+	MaxSleepTime     time.Duration
 	InitialSleepTime time.Duration
 }
 
@@ -460,6 +460,7 @@ func main() {
 }
 
 func startDaemon() {
+	// TODO: there might be an issue with this?
 	loc := Find(os.Args, "-d")
 	var command []string
 	if loc < 0 {
@@ -629,7 +630,7 @@ func readKeys() ([]byte, ssh.Signer, error) {
 }
 
 func ensureHomeFolderExists() {
-	err := os.Mkdir(OPENPORT_HOME, 0600)
+	err := os.Mkdir(OPENPORT_HOME, 0700)
 	if err != nil {
 		if !os.IsExist(err) {
 			log.Fatal(err)
@@ -723,7 +724,7 @@ func restartSessions(server string, database string) {
 					}
 					restartCommand = []string{unpickledString}
 				}
-				if strings.Contains(restartCommand[0], "openport"){
+				if strings.Contains(restartCommand[0], "openport") {
 					restartCommand = restartCommand[1:]
 				}
 			}
@@ -757,7 +758,7 @@ func restartSessions(server string, database string) {
 	}
 
 	buf, err := ioutil.ReadFile(USER_CONFIG_FILE)
-	if err == nil {
+	if err != nil {
 		log.Warnf("Could not read file %s: %s", USER_CONFIG_FILE, err)
 	} else {
 		users := strings.Split(string(buf), "\n")
@@ -799,6 +800,7 @@ func killAll() {
 
 func stopSession(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "Ok")
+	// TODO: stop session from restarting.
 	go os.Exit(5)
 }
 
