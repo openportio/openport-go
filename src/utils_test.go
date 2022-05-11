@@ -128,6 +128,7 @@ func timeoutFunction(t *testing.T, f func(), timeout time.Duration) {
 	case res := <-appReady:
 		fmt.Println(res)
 	case <-time.After(timeout):
+		debug.PrintStack()
 		t.Fatal("Function did not return in time")
 	}
 }

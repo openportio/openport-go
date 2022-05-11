@@ -16,8 +16,8 @@ type Session struct {
 	RemotePort     int
 	LocalPort      int
 	Pid            int
-	Active         bool
-	RestartCommand string
+	Active         bool   // Means that the session should be running
+	RestartCommand string // If empty, do not restart
 
 	AccountId          int
 	KeyId              int
@@ -62,7 +62,13 @@ func (dbHandler *DBHandler) GetForwardSession(remotePort int, sshServer string) 
 	defer db.Close()
 
 	var session Session
-	db.First(&session, "remote_port = ? and (ssh_server = ? or ifnull(ssh_server, '') = '') and forward_tunnel = ?", remotePort, sshServer, true)
+	var whereClause string
+	if sshServer != "" {
+		whereClause = "remote_port = ? and (ssh_server = ? or ifnull(ssh_server, '') = '') and forward_tunnel = 1"
+	} else {
+		whereClause = "remote_port = ? and forward_tunnel = 1"
+	}
+	db.First(&session, whereClause, remotePort, sshServer)
 	if db.Error != nil {
 		return session, db.Error
 	}
@@ -115,5 +121,17 @@ func (dbHandler *DBHandler) GetAllActive() ([]Session, error) {
 
 	var sessions []Session
 	db.Where("active = 1").Find(&sessions)
+	return sessions, db.Error
+}
+
+func (dbHandler *DBHandler) GetSessionsToRestart() ([]Session, error) {
+	db, err := gorm.Open("sqlite3", dbHandler.DbPath)
+	if err != nil {
+		panic("failed to connect database")
+	}
+	defer db.Close()
+
+	var sessions []Session
+	db.Where("ifnull(restart_command, '') != '' ").Find(&sessions)
 	return sessions, db.Error
 }

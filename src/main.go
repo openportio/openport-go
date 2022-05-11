@@ -570,58 +570,56 @@ func (app *OpenportApp) listSessions() {
 
 func (app *OpenportApp) restartSessions(args []string, server string, database string) {
 	log.Debug("Restarting Sessions")
-	sessions, err := app.dbHandler.GetAllActive()
+	sessions, err := app.dbHandler.GetSessionsToRestart()
 	if err != nil {
 		panic(err)
 	}
 	for _, session := range sessions {
-		if session.RestartCommand != "" {
-			log.Debug("Restarting session: ", session.LocalPort)
-			restartCommand := strings.Split(session.RestartCommand, " ")
-			if (len(restartCommand) > 1 && restartCommand[1][0] != '-') ||
-				strings.Contains(restartCommand[0], "\n") ||
-				restartCommand[0][0] == 0x80 {
-				log.Debugf("Migrating from older version: %s", session.RestartCommand)
-				// Python pickle
-				buf := bytes.NewBufferString(session.RestartCommand)
-				dec := ogrek.NewDecoder(buf)
-				unpickled, err := dec.Decode()
-				if err != nil {
-					log.Error(err)
-					log.Warn("Session will not be restarted")
+		log.Debug("Restarting session: ", session.LocalPort)
+		restartCommand := strings.Split(session.RestartCommand, " ")
+		if (len(restartCommand) > 1 && restartCommand[1][0] != '-') ||
+			strings.Contains(restartCommand[0], "\n") ||
+			restartCommand[0][0] == 0x80 {
+			log.Debugf("Migrating from older version: %s", session.RestartCommand)
+			// Python pickle
+			buf := bytes.NewBufferString(session.RestartCommand)
+			dec := ogrek.NewDecoder(buf)
+			unpickled, err := dec.Decode()
+			if err != nil {
+				log.Error(err)
+				log.Warn("Session will not be restarted")
+				continue
+			}
+			log.Debugf("this is unpickled : <%s>", unpickled)
+			restartCommand = []string{}
+			unpickledInterfaces, castWasOk := unpickled.([]interface{})
+			if castWasOk {
+				for _, part := range unpickledInterfaces {
+					restartCommand = append(restartCommand, part.(string))
+				}
+			} else {
+				unpickledString := unpickled.(string)
+				if unpickledString == "" {
 					continue
 				}
-				log.Debugf("this is unpickled : <%s>", unpickled)
-				restartCommand = []string{}
-				unpickledInterfaces, castWasOk := unpickled.([]interface{})
-				if castWasOk {
-					for _, part := range unpickledInterfaces {
-						restartCommand = append(restartCommand, part.(string))
-					}
-				} else {
-					unpickledString := unpickled.(string)
-					if unpickledString == "" {
-						continue
-					}
-					restartCommand = []string{unpickledString}
-				}
-				if strings.Contains(restartCommand[0], "openport") {
-					restartCommand = restartCommand[1:]
-				}
+				restartCommand = []string{unpickledString}
 			}
+			if strings.Contains(restartCommand[0], "openport") {
+				restartCommand = restartCommand[1:]
+			}
+		}
 
-			if server != DEFAULT_SERVER {
-				restartCommand = append(restartCommand, "--server", server)
-			}
-			if database != db.OPENPORT_DB_PATH {
-				restartCommand = append(restartCommand, "--database", database)
-			}
-			log.Infof("Running command %s with args %s", args[0], restartCommand)
-			cmd := exec.Command(args[0], restartCommand...)
-			err = cmd.Start()
-			if err != nil {
-				log.Warn(err)
-			}
+		if server != DEFAULT_SERVER {
+			restartCommand = append(restartCommand, "--server", server)
+		}
+		if database != db.OPENPORT_DB_PATH && Find(restartCommand, "--database") < 0 {
+			restartCommand = append(restartCommand, "--database", database)
+		}
+		log.Infof("Running command %s with args %s", args[0], restartCommand)
+		cmd := exec.Command(args[0], restartCommand...)
+		err = cmd.Start()
+		if err != nil {
+			log.Warn(err)
 		}
 	}
 
@@ -682,8 +680,10 @@ func (app *OpenportApp) killAll() {
 
 func (app *OpenportApp) stopSession(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "Ok")
-	app.stopMutex.Unlock()
-	time.Sleep(1 * time.Second)
+	if !app.stopped {
+		app.stopMutex.Unlock()
+		time.Sleep(1 * time.Second)
+	}
 
 	// TODO: stop session from restarting.  Done?
 	// TODO: Force flag
@@ -720,7 +720,7 @@ func portIsAvailable(port int) bool {
 	return true
 }
 
-func (app *OpenportApp) enrichSessionWithHistory(session db.Session) db.Session {
+func (app *OpenportApp) enrichSessionWithHistory(session *db.Session) db.Session {
 	if session.ForwardTunnel {
 		if session.LocalPort < 0 {
 			dbSession, err := app.dbHandler.GetForwardSession(session.RemotePort, session.SshServer)
@@ -729,6 +729,7 @@ func (app *OpenportApp) enrichSessionWithHistory(session db.Session) db.Session 
 			} else {
 				if dbSession.LocalPort > 0 && portIsAvailable(dbSession.LocalPort) {
 					session.LocalPort = dbSession.LocalPort
+					session.ID = dbSession.ID
 				}
 			}
 			return dbSession
@@ -745,6 +746,7 @@ func (app *OpenportApp) enrichSessionWithHistory(session db.Session) db.Session 
 			if session.RemotePort < 0 || session.RemotePort == dbSession.RemotePort {
 				session.SessionToken = dbSession.SessionToken
 				session.RemotePort = dbSession.RemotePort
+				session.ID = dbSession.ID
 			}
 		}
 		return dbSession
@@ -814,7 +816,7 @@ func (app *OpenportApp) createTunnel() {
 		log.Fatalf("Error during fetching/creating key: %s", err)
 	}
 	app.dbHandler.InitDB()
-	dbSession := app.enrichSessionWithHistory(app.Session)
+	dbSession := app.enrichSessionWithHistory(&app.Session)
 	if dbSession.ID > 0 && sessionIsLive(dbSession) {
 		log.Fatalf("Port forward already running for port %d with PID %d",
 			dbSession.LocalPort, dbSession.Pid)
