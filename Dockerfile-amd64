@@ -3,10 +3,9 @@ MAINTAINER JanDeBleser
 
 ENV LANG C.UTF-8
 
-RUN apt-get update; apt-get install -y software-properties-common
+RUN apt-get update && apt-get install -y software-properties-common
 RUN add-apt-repository ppa:longsleep/golang-backports
-RUN apt-get update
-RUN apt-get install -y golang-1.14-go
+RUN apt-get update && apt-get install -y golang-1.14-go git
 
 WORKDIR /apps/go/
 
@@ -14,11 +13,11 @@ ENV PATH=$PATH:/usr/lib/go-1.14/bin
 ENV GOBIN=$GOPATH/bin
 RUN go version
 
-COPY go.mod \
-    go.sum \
+COPY src/go.mod \
+    src/go.sum \
     /apps/go/
 RUN go mod download
 
-COPY main.go /apps/go/
+COPY src/ /apps/go/
 
 RUN go build -o openport-amd64 main.go

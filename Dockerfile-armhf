@@ -22,8 +22,8 @@ RUN dpkg --add-architecture armhf \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-COPY go.mod \
-    go.sum \
+COPY src/go.mod \
+    src/go.sum \
     /apps/go/
 
 WORKDIR /apps/go/
@@ -31,5 +31,5 @@ WORKDIR /apps/go/
 RUN go mod download
 RUN apt-get install -y curl
 
-COPY main.go /apps/go/
+COPY src/ /apps/go/
 RUN go build -o openport-armhf main.go

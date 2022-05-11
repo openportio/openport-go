@@ -1,6 +1,6 @@
 #!/bin/bash
 set -ex
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/src"
 export PATH=$PATH:/usr/local/go/bin
 export HOME
 

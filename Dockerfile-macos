@@ -26,12 +26,12 @@ ENV GOOS=darwin
 ENV GOARCH=amd64
 ENV CGO_ENABLED=1
 
-COPY go.mod \
-    go.sum \
+COPY src/go.mod \
+    src/go.sum \
     /apps/go/
 
 RUN go mod download
 
-COPY main.go /apps/go/
+COPY src/ /apps/go/
 
 RUN go build -o openport-macos main.go

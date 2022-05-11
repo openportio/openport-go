@@ -22,8 +22,8 @@ RUN dpkg --add-architecture arm64 \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY go.mod \
-    go.sum \
+COPY src/go.mod \
+    src/go.sum \
     /apps/go/
 
 WORKDIR /apps/go/
@@ -33,5 +33,5 @@ ENV CC=aarch64-linux-gnu-gcc
 ENV CC_FOR_TARGET=aarch64-linux-gnu-gcc
 RUN go mod download
 
-COPY main.go /apps/go/
+COPY src/ /apps/go/
 RUN go build -o openport-arm64 main.go

@@ -21,8 +21,8 @@ RUN dpkg --add-architecture arm \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-COPY go.mod \
-    go.sum \
+COPY src/go.mod \
+    src/go.sum \
     /apps/go/
 
 WORKDIR /apps/go/
@@ -32,5 +32,5 @@ ENV GOARM=6
 RUN go mod download
 RUN apt-get install -y curl
 
-COPY main.go /apps/go/
+COPY src/ /apps/go/
 RUN go build -o openport-armv6 main.go

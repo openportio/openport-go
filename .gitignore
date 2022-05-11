@@ -28,3 +28,4 @@ openport
 openport-*
 openportw-*
 test.db
+src/tmp/

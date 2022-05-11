@@ -53,14 +53,14 @@ RUN set -ex \
 
 #COPY ./scripts /scripts
 
-COPY go.mod \
-    go.sum \
+COPY src/go.mod \
+    src/go.sum \
     /apps/go/
 
 WORKDIR /apps/go/
 
 RUN go mod download
 
-COPY main.go /apps/go/
+COPY src/ /apps/go/
 RUN go build -o openport-windows-amd64 main.go
 RUN go build -o openportw-windows-amd64 -ldflags -H=windowsgui main.go
