@@ -8,7 +8,7 @@ pipeline {
     }
     stage('Run Tests') {
       steps {
-        sh '''cd openport-go-client && docker-compose up --build --abort-on-container-exit'''
+        sh '''docker-compose up --build --abort-on-container-exit'''
       }
     }
   }
@@ -17,7 +17,7 @@ pipeline {
       sh '''cd openport-go-client && docker-compose down'''
       sh '''docker system prune -f || true'''
       sh '''docker volume prune -f || true'''
-      junit 'openport-go-client/test-results/report.xml'
+      junit 'test-results/report.xml'
     }
     failure {
         mail(
