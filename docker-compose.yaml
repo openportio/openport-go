@@ -1,0 +1,11 @@
+version: '3'
+services:
+  client_tests:
+    build:
+      context: "."
+      dockerfile: Dockerfile-amd64
+    command: "gotestsum --junitfile /apps/go/test-results/report.xml"
+    volumes:
+      - ./test-results:/apps/go/test-results/
+  # // for debugging only
+#      - ./src/:/apps/go/src/

@@ -29,3 +29,4 @@ openport-*
 openportw-*
 test.db
 src/tmp/
+test-results/

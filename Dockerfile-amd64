@@ -11,7 +11,9 @@ WORKDIR /apps/go/
 
 ENV PATH=$PATH:/usr/lib/go-1.14/bin
 ENV GOBIN=$GOPATH/bin
+ENV OPENPORT_EXE=/apps/go/openport-amd64
 RUN go version
+RUN go get gotest.tools/gotestsum
 
 COPY src/go.mod \
     src/go.sum \

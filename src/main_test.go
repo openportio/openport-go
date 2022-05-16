@@ -9,7 +9,8 @@ import (
 )
 
 const TEST_SERVER = "https://test2.openport.io"
-const OPENPORT_EXE = "/Users/jan/swprojects/openport-go-client/src/openport"
+
+var OPENPORT_EXE = defaultEnv("OPENPORT_EXE", "/Users/jan/swprojects/openport-go-client/src/openport")
 
 func TestReverseTunnel(t *testing.T) {
 	dbFile := "tmp/TestReverseTunnel.db"

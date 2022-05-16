@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -110,7 +111,7 @@ func waitForApp(t *testing.T, app *OpenportApp) {
 	select {
 	case res := <-appReady:
 		fmt.Println(res)
-	case <-time.After(10 * time.Second):
+	case <-time.After(15 * time.Second):
 		app.Stop()
 		t.Fatal("App did not connect in time")
 	}
@@ -137,4 +138,12 @@ func getFreePort(t *testing.T) int {
 	port, err := freeport.GetFreePort()
 	failIfError(t, err)
 	return port
+}
+
+func defaultEnv(key string, deflt string) string {
+	result := deflt
+	if os.Getenv(key) != "" {
+		result = os.Getenv(key)
+	}
+	return result
 }
