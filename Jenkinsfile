@@ -14,7 +14,7 @@ pipeline {
   }
   post {
     always {
-      sh '''cd openport-go-client && docker-compose down'''
+      sh '''docker-compose down'''
       sh '''docker system prune -f || true'''
       sh '''docker volume prune -f || true'''
       junit 'test-results/report.xml'
