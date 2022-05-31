@@ -3,7 +3,7 @@ pipeline {
   stages {
     stage('Checkout Scm') {
       steps {
-        git(url: 'bitbucket.org:jan_de_bleser/openport-go-client.git', credentialsId: 'b92c4920-b14b-4568-9840-df41de323726')
+        git(url: 'https://github.com/openportio/openport-go')
       }
     }
     stage('Run Tests') {
