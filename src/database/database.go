@@ -135,3 +135,37 @@ func (dbHandler *DBHandler) GetSessionsToRestart() ([]Session, error) {
 	db.Where("ifnull(restart_command, '') != '' ").Find(&sessions)
 	return sessions, db.Error
 }
+
+func (dbHandler *DBHandler) EnrichSessionWithHistory(session *Session) Session {
+	if session.ForwardTunnel {
+		if session.LocalPort < 0 {
+			dbSession, err := dbHandler.GetForwardSession(session.RemotePort, session.SshServer)
+			if err != nil {
+				log.Errorf("error fetching session %s", err)
+			} else {
+				if dbSession.LocalPort > 0 && utils.PortIsAvailable(dbSession.LocalPort) {
+					session.LocalPort = dbSession.LocalPort
+					session.ID = dbSession.ID
+				}
+			}
+			return dbSession
+		}
+	} else {
+		dbSession, err := dbHandler.GetSession(session.LocalPort)
+		if err != nil {
+			log.Errorf("error fetching session %s", err)
+		} else {
+			if dbSession.RestartCommand != "" && session.RestartCommand == "" {
+				log.Infof("Port forward for port %d that would be restarted on reboot will not be restarted anymore.", session.LocalPort)
+			}
+
+			if session.RemotePort < 0 || session.RemotePort == dbSession.RemotePort {
+				session.SessionToken = dbSession.SessionToken
+				session.RemotePort = dbSession.RemotePort
+				session.ID = dbSession.ID
+			}
+		}
+		return dbSession
+	}
+	return Session{}
+}

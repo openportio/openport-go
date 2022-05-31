@@ -112,16 +112,17 @@ func waitForApp(t *testing.T, app *OpenportApp) {
 	case res := <-appReady:
 		fmt.Println(res)
 	case <-time.After(15 * time.Second):
-		app.Stop()
+		app.Stop(1)
 		t.Fatal("App did not connect in time")
 	}
 }
 
-func timeoutFunction(t *testing.T, f func(), timeout time.Duration) {
+func timeoutFunction(t *testing.T, f func() string, timeout time.Duration) string {
 	appReady := make(chan string, 1)
 
+	var result string
 	go func() {
-		f()
+		result = f()
 		appReady <- "ready"
 	}()
 
@@ -132,6 +133,7 @@ func timeoutFunction(t *testing.T, f func(), timeout time.Duration) {
 		debug.PrintStack()
 		t.Fatal("Function did not return in time")
 	}
+	return result
 }
 
 func getFreePort(t *testing.T) int {
