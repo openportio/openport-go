@@ -3,7 +3,7 @@ pipeline {
   stages {
     stage('Checkout Scm') {
       steps {
-        git(url: 'https://github.com/openportio/openport-go')
+        git(url: 'https://github.com/openportio/openport-go', branch: 'main')
       }
     }
     stage('Run Tests') {
