@@ -83,7 +83,7 @@ func (dbHandler *DBHandler) GetSession(localPort int) (Session, error) {
 	defer db.Close()
 
 	var session Session
-	db.First(&session, "local_port = ? and forward_tunnel = ?", localPort, false)
+	db.First(&session, "local_port = ? and IFNULL(forward_tunnel, 0) = 0", localPort)
 	if db.Error != nil {
 		return session, db.Error
 	}
