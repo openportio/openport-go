@@ -6,6 +6,9 @@ COPY requirements.txt /apps/openport/
 RUN pip install -r requirements.txt
 ENV BUILD_OPENPORT_EXE=0
 ENV OPENPORT_EXE=/openport-amd64
+ENV TOXI_PROXY_HOST=toxiproxy
+ENV OPENPORT_TEST_HOST=openport-test
+ENV SOCKS_PROXY=proxy-no-password
 COPY --from=builder /apps/go/openport-amd64 /openport-amd64
 
 ADD . /apps/openport
