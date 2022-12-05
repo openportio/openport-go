@@ -3,6 +3,7 @@ pipeline {
   stages {
     stage('Run Tests') {
       steps {
+        sh '''rm -rf test-results/*'''
         sh '''docker-compose up --build --abort-on-container-exit'''
         sh '''cd python_tests ; make test'''
       }
