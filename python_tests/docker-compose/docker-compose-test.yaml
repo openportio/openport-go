@@ -15,7 +15,7 @@ services:
     volumes:
       - ..:/apps/openport
       - ../../test-results/:/test-results/
-    command: python -m unittest tests.app_tests.AppTests.test_exits_on_disconnect_if_connection_timeout_set
+#    command: python -m unittest tests.app_tests.AppTests.test_exits_on_disconnect_if_connection_timeout_set
 
   proxy-no-password:
     image: serjs/go-socks5-proxy
