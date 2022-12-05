@@ -30,3 +30,6 @@ openportw-*
 test.db
 src/tmp/
 test-results/
+
+*.pyc
+python_tests/tests/testfiles/tmp/*

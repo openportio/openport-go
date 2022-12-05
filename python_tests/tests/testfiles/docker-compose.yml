@@ -1,0 +1,17 @@
+version: "3"
+
+services:
+  client:
+    build:
+      dockerfile: Dockerfile
+      context: .
+    privileged: true
+    networks:
+      - openport
+
+
+
+
+networks:
+  openport:
+
