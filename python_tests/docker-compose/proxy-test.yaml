@@ -1,0 +1,26 @@
+version: '3'
+
+services:
+  openport-go:
+    image: openport-go-amd64
+    networks:
+      - no-internet
+    command: ./openport-amd64 22 --proxy=socks5://USER:PASSWORD@proxy:1080 --verbose
+    depends_on:
+      - proxy
+
+  proxy:
+    image: serjs/go-socks5-proxy
+    environment:
+      - PROXY_USER=USER
+      - PROXY_PASSWORD=PASSWORD
+    networks:
+      - no-internet
+      - internet
+
+networks:
+  no-internet:
+    driver: bridge
+    internal: true
+  internet:
+    driver: bridge
