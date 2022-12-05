@@ -3,7 +3,8 @@ build:
 	docker build -f Dockerfile -t openport-test .
 
 test: build
-	docker run -it -v $$(pwd):/apps/openport -v $$(pwd)/../test-results/:/test-results/ openport-test
+	INTERACTIVE:=$(shell [ -t 0 ] && echo "-t")
+	docker run -i $INTERACTIVE -v $$(pwd):/apps/openport -v $$(pwd)/../test-results/:/test-results/ openport-test
 
 bash-test:
 	docker run -it -v $$(pwd):/apps/openport openport-test bash
