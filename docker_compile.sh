@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
+INTERACTIVE=$([ -t 0 ] && echo "-t")
 set -ex
 cd "$(dirname "$0")"
-INTERACTIVE=$([ -t 0 ] && echo "-t")
-
 
 ARCH=${1:-amd64}
 
