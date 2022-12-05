@@ -1,10 +1,11 @@
+INTERACTIVE:=$(shell [ -t 0 ] && echo "-t")
+
 build:
 	../docker_compile.sh
 	docker build -f Dockerfile -t openport-test .
 
 test: build
-	INTERACTIVE:=$(shell [ -t 0 ] && echo "-t")
-	docker run -i $INTERACTIVE -v $$(pwd):/apps/openport -v $$(pwd)/../test-results/:/test-results/ openport-test
+	docker run -i $(INTERACTIVE) -v $$(pwd):/apps/openport -v $$(pwd)/../test-results/:/test-results/ openport-test
 
 bash-test:
 	docker run -it -v $$(pwd):/apps/openport openport-test bash
