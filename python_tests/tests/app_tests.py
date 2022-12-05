@@ -12,6 +12,8 @@ import xmlrunner as xmlrunner
 from threading import Thread
 from time import sleep
 
+from toxiproxy.api import APIConsumer
+
 from tests.utils.app_tcp_server import send_exit, is_running
 from tests.utils import osinteraction, dbhandler
 from tests.utils.logger_service import get_logger, set_log_level
@@ -61,9 +63,13 @@ else:
 
 openport_go_dir = Path(__file__).parents[2]
 
+TOXI_PROXY_HOST = os.environ.get("TOXI_PROXY_HOST", "127.0.0.1")
+
 
 class AppTests(unittest.TestCase):
-    openport_exe = [os.environ.get("OPENPORT_EXE", str(openport_go_dir / "src" / "openport"))]
+    openport_exe = [
+        os.environ.get("OPENPORT_EXE", str(openport_go_dir / "src" / "openport"))
+    ]
     # openport_exe = [str(openport_go_dir / 'openport')]
     restart_shares = "restart-sessions"
     kill = "kill"
@@ -2273,12 +2279,14 @@ for i in range(%s):
 
         # make sure you've run
         # docker-compose -f docker-compose/toxiproxy.yaml up
+        APIConsumer.host = TOXI_PROXY_HOST
         server = toxiproxy.Toxiproxy()
         server.destroy_all()
-        ip = get_ip()
-        return "127.0.0.1:22220", server.create(
+        socks_proxy = os.environ.get("SOCKS_PROXY", get_ip())
+
+        return f"{TOXI_PROXY_HOST}:22220", server.create(
             name="socks_proxy",
-            upstream=f"{ip}:1080",
+            upstream=f"{socks_proxy}:1080",
             enabled=True,
             listen="0.0.0.0:22220",
         )

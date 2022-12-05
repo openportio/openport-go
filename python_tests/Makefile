@@ -5,7 +5,7 @@ build:
 	docker build -f Dockerfile -t openport-test .
 
 test: build
-	docker run -i $(INTERACTIVE) -v $$(pwd):/apps/openport -v $$(pwd)/../test-results/:/test-results/ openport-test
+	docker-compose -f docker-compose/docker-compose-test.yaml up --build --abort-on-container-exit
 
 bash-test:
 	docker run -it -v $$(pwd):/apps/openport openport-test bash

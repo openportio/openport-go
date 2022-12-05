@@ -1,0 +1,23 @@
+version: '3'
+
+services:
+  toxiproxy:
+    image: shopify/toxiproxy:2.1.4
+    ports:
+      - 8474:8474
+      - 22220:22220
+
+  openport-test:
+    build:
+      dockerfile: Dockerfile
+      context: ..
+
+    volumes:
+      - ..:/apps/openport
+      - ../../test-results/:/test-results/
+    command: python -m unittest tests.app_tests.AppTests.test_exits_on_disconnect_if_connection_timeout_set
+
+  proxy-no-password:
+    image: serjs/go-socks5-proxy
+    ports:
+      - 1080:1080
