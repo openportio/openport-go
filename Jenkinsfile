@@ -1,11 +1,6 @@
 pipeline {
   agent any
   stages {
-    stage('Checkout Scm') {
-      steps {
-        git(url: 'https://github.com/openportio/openport-go', branch: 'main')
-      }
-    }
     stage('Run Tests') {
       steps {
         sh '''docker-compose up --build --abort-on-container-exit'''
