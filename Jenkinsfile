@@ -9,6 +9,7 @@ pipeline {
     stage('Run Tests') {
       steps {
         sh '''docker-compose up --build --abort-on-container-exit'''
+        sh '''cd python_tests ; make test'''
       }
     }
   }
@@ -17,7 +18,7 @@ pipeline {
       sh '''docker-compose down'''
       sh '''docker system prune -f || true'''
       sh '''docker volume prune -f || true'''
-      junit 'test-results/report.xml'
+      junit 'test-results/*.xml'
     }
     failure {
         mail(

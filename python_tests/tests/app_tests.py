@@ -63,7 +63,7 @@ openport_go_dir = Path(__file__).parents[2]
 
 
 class AppTests(unittest.TestCase):
-    openport_exe = [str(openport_go_dir / "src" / "openport")]
+    openport_exe = [os.environ.get("OPENPORT_EXE", str(openport_go_dir / "src" / "openport"))]
     # openport_exe = [str(openport_go_dir / 'openport')]
     restart_shares = "restart-sessions"
     kill = "kill"
@@ -75,11 +75,12 @@ class AppTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        exit_code, output = subprocess.getstatusoutput(
-            str(openport_go_dir / "compile.sh")
-        )
-        print(output)
-        assert exit_code == 0, exit_code
+        if os.environ.get("BUILD_OPENPORT_EXE", "1") == "1":
+            exit_code, output = subprocess.getstatusoutput(
+                str(openport_go_dir / "compile.sh")
+            )
+            print(output)
+            assert exit_code == 0, exit_code
 
     def setUp(self):
         logging.getLogger("sqlalchemy").setLevel(logging.WARN)

@@ -1,19 +1,22 @@
-FROM ubuntu:18.04
+FROM ubuntu:20.04
 MAINTAINER JanDeBleser
 
 ENV LANG C.UTF-8
 
-RUN apt-get update && apt-get install -y software-properties-common
-RUN add-apt-repository ppa:longsleep/golang-backports
-RUN apt-get update && apt-get install -y golang-1.14-go git
+RUN apt-get update && apt-get install -y software-properties-common wget gcc
+RUN wget https://go.dev/dl/go1.19.3.linux-amd64.tar.gz && \
+    rm -rf /usr/local/go &&  \
+    tar -C /usr/local -xzf go1.19.3.linux-amd64.tar.gz
+ENV PATH=$PATH:/usr/local/go/bin
 
 WORKDIR /apps/go/
 
-ENV PATH=$PATH:/usr/lib/go-1.14/bin
 ENV GOBIN=$GOPATH/bin
 ENV OPENPORT_EXE=/apps/go/openport-amd64
 RUN go version
-RUN go get gotest.tools/gotestsum
+RUN wget https://github.com/gotestyourself/gotestsum/releases/download/v1.8.2/gotestsum_1.8.2_linux_amd64.tar.gz && \
+    tar -xf gotestsum*.gz && \
+    mv gotestsum /usr/bin
 
 COPY src/go.mod \
     src/go.sum \
