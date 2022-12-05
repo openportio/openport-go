@@ -1,8 +1,9 @@
-build-docker-test:
-	docker build -f Dockerfile.test -t openport-test .
+build:
+	../docker_compile.sh
+	docker build -f Dockerfile -t openport-test .
 
-test:
-	docker run -it -v $$(pwd):/apps/openport openport-test
+test: build
+	docker run -it -v $$(pwd):/apps/openport -v $$(pwd)/../test-results/:/test-results/ openport-test
 
 bash-test:
 	docker run -it -v $$(pwd):/apps/openport openport-test bash
