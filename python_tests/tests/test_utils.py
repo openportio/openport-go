@@ -389,13 +389,13 @@ def kill_all_processes(processes_to_kill):
 
 def click_open_for_ip_link(link):
     if link:
-        link = link.replace("https", "http")
+        # link = link.replace("https", "http")
         logger.info("clicking link %s" % link)
         #        ctx = ssl.create_default_context()
         #        ctx.check_hostname = False
         #        ctx.verify_mode = ssl.CERT_NONE
         req = Request(link)
-        response = run_method_with_timeout(lambda: urlopen(req, timeout=10).read(), 10)
+        response = run_method_with_timeout(lambda: urlopen(req, timeout=20).read(), 20)
         assert response is not None
         assert "is now open" in response.decode("utf-8")
 
