@@ -245,6 +245,9 @@ func (app *OpenportApp) run(args []string) {
 		"Let users click a secret link before they can "+
 			"access this port. This overwrites the setting in your profile. choices=[True, False]")
 	httpForward := defaultFlagSet.Bool("http-forward", false, "Request an http forward, so you can connect to port 80 on the server.")
+	sshServer := defaultFlagSet.String("request-server", "", "The requested tunnel server")
+	defaultFlagSet.MarkHidden("request-server")
+
 	forwardTunnelFlagSet := flag.NewFlagSet("forward", flag.ExitOnError)
 	addSharedFlags(forwardTunnelFlagSet)
 
@@ -454,7 +457,7 @@ func (app *OpenportApp) run(args []string) {
 			Active:              true,
 			ForwardTunnel:       forwardTunnel,
 			RemotePort:          remotePortInt,
-			//SshServer:           sshServer,
+			SshServer:           *sshServer,
 		}
 		controlPort := app.startControlServer(controlPort)
 		app.Session.AppManagementPort = controlPort
@@ -886,7 +889,7 @@ func (app *OpenportApp) requestPortForward(session *db.Session, publicKey []byte
 		"http_forward":          {strconv.FormatBool(session.HttpForward)},
 		"platform":              {runtime.GOOS},
 		"forward_tunnel":        {strconv.FormatBool(session.ForwardTunnel)},
-		"ssh_server":            {session.SshServer},
+		"request_server":        {session.SshServer},
 		"automatic_restart":     {strconv.FormatBool(session.AutomaticRestart)},
 	}
 	switch strings.ToLower(session.UseIpLinkProtection) {

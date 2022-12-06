@@ -2410,6 +2410,61 @@ for i in range(%s):
         finally:
             http_server.stop()
 
+    def test_set_request_server(self):
+        self.check_request_server_is_respected("test2.openport.io", "test2.openport.io")
+        self.check_request_server_is_respected("test2.openport.io", "test.openport.io")
+        self.check_request_server_is_respected("test.openport.io", "test2.openport.io")
+        self.check_request_server_is_respected("test.openport.io", "test.openport.io")
+
+    def check_request_server_is_respected(self, https_server, ssh_server):
+        local_port = self.osinteraction.get_open_port()
+        p = subprocess.Popen(
+            self.openport_exe
+            + [
+                "--local-port",
+                str(local_port),
+                "--server",
+                f"https://{https_server}",
+                "--request-server",
+                ssh_server,
+                "--verbose",
+                "--database",
+                self.db_file,
+            ],
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+        self.processes_to_kill.append(p)
+        remote_host, remote_port, link = get_remote_host_and_port(p, self.osinteraction)
+        self.assertEqual(ssh_server, remote_host)
+
+    def check_live_server(self, tunnel_server):
+        local_port = self.osinteraction.get_open_port()
+        p = subprocess.Popen(
+            self.openport_exe
+            + [
+                "--local-port",
+                str(local_port),
+                "--request-server",
+                tunnel_server,
+                "--verbose",
+                "--database",
+                self.db_file,
+            ],
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+        self.processes_to_kill.append(p)
+        remote_host, remote_port, link = get_remote_host_and_port(p, self.osinteraction)
+        click_open_for_ip_link(link)
+        self.assertEqual(tunnel_server, remote_host)
+        check_tcp_port_forward(self, remote_host, local_port, remote_port)
+
+    def test_all_servers_live(self):
+        self.check_live_server("openport.io")
+        self.check_live_server("spr.openport.io")
+        self.check_live_server("us.openport.io")
+
 
 if __name__ == "__main__":
     unittest.main(testRunner=xmlrunner.XMLTestRunner(output="test-reports"))
