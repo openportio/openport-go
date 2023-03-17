@@ -53,6 +53,8 @@ TEST_SERVER = "https://test.openport.io"
 # TEST_SERVER = 'https://us.openport.io'
 # TEST_SERVER = 'http://192.168.64.2.xip.io'
 
+KEY_REGISTRATION_TOKEN = os.environ.get("KEY_REGISTRATION_TOKEN")
+
 
 if not osinteraction.is_windows():
     PYTHON_EXE = subprocess.getoutput("which python")
@@ -87,6 +89,23 @@ class AppTests(unittest.TestCase):
             )
             print(output)
             assert exit_code == 0, exit_code
+
+        if KEY_REGISTRATION_TOKEN:
+            p = subprocess.Popen(
+                cls.openport_exe
+                + [
+                    "register-key",
+                    KEY_REGISTRATION_TOKEN,
+                    "--server",
+                    TEST_SERVER,
+                    "--verbose",
+                ],
+                stderr=subprocess.STDOUT,
+            )
+            osinteraction.getInstance().print_output_continuously_threaded(p)
+            run_method_with_timeout(p.wait, 10)
+            if p.returncode != 0:
+                raise Exception("Could not register key")
 
     def setUp(self):
         logging.getLogger("sqlalchemy").setLevel(logging.WARN)
@@ -1644,6 +1663,7 @@ class AppTests(unittest.TestCase):
         self.processes_to_kill.append(p)
         remote_host, remote_port, link = get_remote_host_and_port(p, self.osinteraction)
         self.check_application_is_still_alive(p)
+        sleep(1)
 
         session = self.db_handler.get_share_by_local_port(port)
         data = {
