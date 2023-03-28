@@ -421,10 +421,12 @@ def check_tcp_port_forward(
         else:
             test.assertEqual(text, response)
         cl.close()
+        print("local server ok")
 
         sleep(3)
 
         # Connect to remote service
+        print(f"Connecting to {remote_host}:{remote_port}")
         cr = SimpleTcpClient(remote_host, remote_port)
         response = cr.send(text).strip()
         if not fail_on_error and text != response:

@@ -251,7 +251,7 @@ class AppTests(unittest.TestCase):
         click_open_for_ip_link(share.open_port_for_ip_link)
         check_tcp_port_forward(
             self,
-            remote_host=share.server.split("://")[-1],
+            remote_host=share.open_port_for_ip_link.split("://")[-1].split("/")[0],
             local_port=port,
             remote_port=share.server_port,
         )
