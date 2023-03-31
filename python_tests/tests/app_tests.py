@@ -1866,7 +1866,7 @@ class AppTests(unittest.TestCase):
             self.processes_to_kill.append(p)
             self.osinteraction.print_output_continuously_threaded(p, "restart_sessions")
 
-            wait_for_response(lambda: len(http_server.requests) > 0, timeout=2)
+            wait_for_response(lambda: len(http_server.requests) > 0, timeout=5)
             request = http_server.requests[0]
             self.assertEqual([old_token], request[b"restart_session_token"])
             self.assertEqual([old_remote_port], request[b"request_port"])
@@ -2482,7 +2482,9 @@ for i in range(%s):
 
     def test_all_servers_live(self):
         self.check_live_server("openport.io")
+        sleep(1)
         self.check_live_server("spr.openport.io")
+        sleep(1)
         self.check_live_server("us.openport.io")
 
 

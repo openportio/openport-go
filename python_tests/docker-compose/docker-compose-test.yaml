@@ -15,9 +15,12 @@ services:
     volumes:
       - ..:/apps/openport
       - ../../test-results/:/test-results/
-    # command: python -m unittest tests.app_tests.AppTests.test_kill_all
+#    command: python -m unittest tests.app_tests.AppTests.test_openport_app__daemonize
     environment:
       - KEY_REGISTRATION_TOKEN=${KEY_REGISTRATION_TOKEN}
+    depends_on:
+      - toxiproxy
+      - proxy-no-password
 
   proxy-no-password:
     image: serjs/go-socks5-proxy

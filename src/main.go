@@ -605,7 +605,7 @@ func (app *OpenportApp) restartSessions(args []string, server string, database s
 	for _, session := range sessions {
 		log.Debug("Restarting session: ", session.LocalPort)
 		restartCommand := strings.Split(session.RestartCommand, " ")
-		if (len(restartCommand) > 1 && restartCommand[1][0] != '-') ||
+		if (len(restartCommand) > 1 && restartCommand[1][0] != '-' && restartCommand[0] != "--port") ||
 			strings.Contains(restartCommand[0], "\n") ||
 			restartCommand[0][0] == 0x80 {
 			log.Debugf("Migrating from older version: %s", session.RestartCommand)
@@ -640,7 +640,7 @@ func (app *OpenportApp) restartSessions(args []string, server string, database s
 		if server != DEFAULT_SERVER {
 			restartCommand = append(restartCommand, "--server", server)
 		}
-		if database != db.OPENPORT_DB_PATH && Find(restartCommand, "--database") < 0 {
+		if database != db.OPENPORT_DB_PATH {
 			restartCommand = append(restartCommand, "--database", database)
 		}
 		log.Infof("Running command %s with args %s", args[0], restartCommand)
@@ -829,6 +829,17 @@ func (app *OpenportApp) createTunnel() {
 		if app.Session.ForwardTunnel {
 			err = app.startForwardTunnel(key, app.Session, response.Message)
 		} else {
+
+			//// TMP!!!!
+			//wsClient := ws_channel.NewWSClient()
+			//
+			//server := strings.Replace(app.Session.Server, "https://", "wss://", 1)
+			//err = wsClient.Connect(server)
+			//if err != nil {
+			//	log.Fatalf("Could not connect to server %s: %s", server, err)
+			//}
+			//err = wsClient.StartReverseTunnel(app.Session.SessionToken, app.Session.LocalPort, app.Session.RemotePort)
+			//
 			err = app.startReverseTunnel(key, app.Session, response.Message)
 		}
 		if !app.stopped {

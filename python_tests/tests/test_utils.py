@@ -345,7 +345,7 @@ def wait_for_response(
         except TimeoutException:
             logger.debug("method timeout")
             pass
-        logger.debug("no response, try again")
+        logger.debug("Waiting for response: no response, try again")
         sleep(1)
     if throw:
         raise TimeoutError("function did not response in time")
