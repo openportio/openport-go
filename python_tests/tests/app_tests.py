@@ -106,6 +106,10 @@ class AppTests(unittest.TestCase):
             run_method_with_timeout(p.wait, 10)
             if p.returncode != 0:
                 raise Exception("Could not register key")
+            else:
+                print("Key registered")
+        else:
+            print("No key registration token set")
 
     def setUp(self):
         logging.getLogger("sqlalchemy").setLevel(logging.WARN)
@@ -2475,10 +2479,13 @@ for i in range(%s):
             stdout=subprocess.PIPE,
         )
         self.processes_to_kill.append(p)
-        remote_host, remote_port, link = get_remote_host_and_port(p, self.osinteraction)
+        remote_host, remote_port, link = get_remote_host_and_port(
+            p, self.osinteraction, timeout=60
+        )
         click_open_for_ip_link(link)
         self.assertEqual(tunnel_server, remote_host)
         check_tcp_port_forward(self, remote_host, local_port, remote_port)
+        p.kill()
 
     def test_all_servers_live(self):
         self.check_live_server("openport.io")
