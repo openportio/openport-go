@@ -5,6 +5,7 @@ services:
       context: "."
       dockerfile: Dockerfile-amd64
     command: "gotestsum --junitfile /apps/go/test-results/report.xml"
+    user: "${UID}:${GID}"
     volumes:
       - ./test-results:/apps/go/test-results/
   # // for debugging only
