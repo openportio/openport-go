@@ -14,7 +14,7 @@ RUN set -ex \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-ENV GOVERSION="1.14"
+ENV GOVERSION="1.19"
 
 
 # install golang
