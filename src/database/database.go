@@ -1,10 +1,13 @@
 package database
 
-import "github.com/jinzhu/gorm"
+import (
+	"github.com/jinzhu/gorm"
+	"path"
+)
 import log "github.com/sirupsen/logrus"
 import "github.com/openportio/openport-go/utils"
 
-var OPENPORT_DB_PATH = utils.OPENPORT_HOME + "/openport.db"
+var DEFAULT_OPENPORT_DB_PATH = path.Join(utils.OPENPORT_HOME, "openport.db")
 
 type Session struct {
 	// gorm.Model
@@ -35,6 +38,15 @@ type Session struct {
 	FallbackSshServerIp   string `gorm:"-"`
 	FallbackSshServerPort int    `gorm:"-"`
 	AutomaticRestart      bool   `gorm:"-"`
+}
+
+func (s Session) PrintMessage(message string) {
+	if s.HttpForward {
+		log.Infof("Now forwarding remote address %s to localhost", s.HttpForwardAddress)
+	} else {
+		log.Infof("Now forwarding remote port %s:%d to localhost:%d", s.SshServer, s.RemotePort, s.LocalPort)
+	}
+	log.Infof(message)
 }
 
 type DBHandler struct {

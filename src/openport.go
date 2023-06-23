@@ -1,4 +1,4 @@
-package main
+package openport
 
 import (
 	"bytes"
@@ -12,11 +12,11 @@ import (
 	ogrek "github.com/kisielk/og-rek"
 	db "github.com/openportio/openport-go/database"
 	"github.com/openportio/openport-go/utils"
+	"github.com/openportio/openport-go/ws_channel"
 	"github.com/orandin/lumberjackrus"
 	"github.com/phayes/freeport"
 	log "github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/writer"
-	flag "github.com/spf13/pflag"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/net/proxy"
 	"io"
@@ -28,6 +28,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"os/user"
+	"path"
 	"runtime"
 	"strconv"
 	"strings"
@@ -36,7 +37,7 @@ import (
 	"time"
 )
 
-const VERSION = "2.1.0"
+const VERSION = "2.1.1"
 const USER_CONFIG_FILE = "/etc/openport/users.conf"
 const DEFAULT_SERVER = "https://openport.io"
 
@@ -53,7 +54,7 @@ const EXIT_CODE_FATAL_SESSION_ERROR = 9
 const EXIT_CODE_LIST = 0
 const EXIT_CODE_HELP = 0
 
-var OPENPORT_LOG_PATH = utils.OPENPORT_HOME + "/openport.log"
+var OPENPORT_LOG_PATH = path.Join(utils.OPENPORT_HOME, "openport.log")
 
 type PortResponse struct {
 	ServerIP              string  `json:"server_ip"`
@@ -82,25 +83,25 @@ type ServerResponseError struct {
 	error string
 }
 
-type OpenportApp struct {
+type App struct {
 	Session              db.Session
-	stopped              bool
-	stopHooks            *list.List
-	dbHandler            db.DBHandler
-	exitCode             chan int // Blocking channel waiting for the exit code.
-	exitOnFailureTimeout int
-	connected            chan bool
-	connectedState       ConnectionState
+	Stopped              bool
+	StopHooks            *list.List
+	DbHandler            db.DBHandler
+	ExitCode             chan int // Blocking channel waiting for the exit code.
+	ExitOnFailureTimeout int
+	Connected            chan bool
+	ConnectedState       ConnectionState
 }
 
-func createApp() *OpenportApp {
-	app := &OpenportApp{
-		exitOnFailureTimeout: -1,
-		exitCode:             make(chan int, 1),
-		stopHooks:            list.New(),
-		connected:            make(chan bool, 1),
+func CreateApp() *App {
+	app := &App{
+		ExitOnFailureTimeout: -1,
+		ExitCode:             make(chan int, 1),
+		StopHooks:            list.New(),
+		Connected:            make(chan bool, 1),
 	}
-	app.connectedState = &DisconnectedState{app: app}
+	app.ConnectedState = &DisconnectedState{app: app}
 	return app
 }
 
@@ -114,13 +115,7 @@ func (s ServerResponseError) Error() string {
 	return s.error
 }
 
-func myUsage() {
-	fmt.Printf("Usage: %s (<port> | forward | list | restart-sessions | kill <port> | kill-all | register-key | help [command] | version) [arguments]\n", os.Args[0])
-}
-
 var stdOutLogHook writer.Hook
-var verbose bool = false
-var flagSets = make(map[string]*flag.FlagSet)
 
 var interProcessHttpClient = http.Client{
 	Timeout: 2 * time.Second,
@@ -128,7 +123,7 @@ var interProcessHttpClient = http.Client{
 
 var loggingReady = false
 
-func initLogging() {
+func InitLogging(verbose bool, logFilePath string) {
 	if loggingReady {
 		return
 	}
@@ -136,7 +131,7 @@ func initLogging() {
 	log.WithField("pid", os.Getpid())
 	hook, err := lumberjackrus.NewHook(
 		&lumberjackrus.LogFile{
-			Filename:   OPENPORT_LOG_PATH,
+			Filename:   logFilePath,
 			MaxSize:    10,
 			MaxBackups: 1,
 			Compress:   true,
@@ -152,7 +147,7 @@ func initLogging() {
 		log.Warn(err)
 	}
 	log.AddHook(hook)
-	log.SetOutput(ioutil.Discard) // Send all logs to nowhere by default
+	log.SetOutput(io.Discard) // Send all logs to nowhere by default
 
 	log.AddHook(&writer.Hook{ // Send logs with level higher than warning to stderr
 		Writer: os.Stderr,
@@ -187,290 +182,7 @@ func initLogging() {
 	loggingReady = true
 }
 
-func main() {
-	app := createApp()
-	go app.run(os.Args)
-	os.Exit(<-app.exitCode)
-}
-
-func (app *OpenportApp) run(args []string) {
-
-	var port int
-	var controlPort int
-	var server string
-	var restartOnReboot bool
-	var keepAliveSeconds int
-	var socksProxy string
-	var remotePort string
-	var daemonize bool
-	var exitOnFailureTimeout int
-
-	addVerboseFlag := func(set *flag.FlagSet) {
-		set.BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
-	}
-
-	addDatabaseFlag := func(set *flag.FlagSet) {
-		set.StringVar(&app.dbHandler.DbPath, "database", db.OPENPORT_DB_PATH, "Database file")
-		set.MarkHidden("database")
-	}
-	addLegacyFlag := func(set *flag.FlagSet, name string) {
-		set.String(name, "legacy", "legacy: do not use")
-		set.MarkHidden(name)
-	}
-
-	addServerFlag := func(set *flag.FlagSet) {
-		set.StringVar(&server, "server", DEFAULT_SERVER, "The server to connect to.")
-		set.MarkHidden("server")
-	}
-
-	addSharedFlags := func(set *flag.FlagSet) {
-		set.IntVar(&port, "port", -1, "The local port you want to expose.")
-		set.IntVar(&port, "local-port", -1, "The local port you want to expose.")
-		set.StringVar(&remotePort, "remote-port", "-1", "The remote port on the server. [openport.io:1234]")
-		set.IntVar(&controlPort, "listener-port", -1, "")
-		set.BoolVarP(&restartOnReboot, "restart-on-reboot", "R", false, "Restart this session when 'restart-sessions' is called (on boot for example).")
-		set.IntVar(&keepAliveSeconds, "keep-alive", 120, "The interval in between keep-alive messages in seconds.")
-		set.StringVar(&socksProxy, "proxy", "", "Socks5 proxy to use. Format: socks5://user:pass@host:port")
-		set.BoolVarP(&daemonize, "daemonize", "d", false, "Start the app in the background.")
-		set.IntVar(&exitOnFailureTimeout, "exit-on-failure-timeout", -1, "Specify in seconds if you want the app to exit if it cannot properly connect.")
-		addVerboseFlag(set)
-		addDatabaseFlag(set)
-		addServerFlag(set)
-		set.MarkHidden("listener-port")
-	}
-
-	defaultFlagSet := flag.NewFlagSet(args[0], flag.ExitOnError)
-	addSharedFlags(defaultFlagSet)
-	useIpLinkProtection := defaultFlagSet.String("ip-link-protection", "",
-		"Let users click a secret link before they can "+
-			"access this port. This overwrites the setting in your profile. choices=[True, False]")
-	httpForward := defaultFlagSet.Bool("http-forward", false, "Request an http forward, so you can connect to port 80 on the server.")
-	sshServer := defaultFlagSet.String("request-server", "", "The requested tunnel server")
-	defaultFlagSet.MarkHidden("request-server")
-
-	forwardTunnelFlagSet := flag.NewFlagSet("forward", flag.ExitOnError)
-	addSharedFlags(forwardTunnelFlagSet)
-
-	// Legacy flags
-	addLegacyFlag(defaultFlagSet, "request-port")
-	addLegacyFlag(defaultFlagSet, "request-token")
-	addLegacyFlag(defaultFlagSet, "start-manager")
-	addLegacyFlag(defaultFlagSet, "manager-port")
-
-	flagSets[""] = defaultFlagSet
-	flagSets["forward"] = forwardTunnelFlagSet
-
-	versionFlagSet := flag.NewFlagSet("version", flag.ExitOnError)
-	flagSets["version"] = versionFlagSet
-
-	killFlagSet := flag.NewFlagSet("kill", flag.ExitOnError)
-	addVerboseFlag(killFlagSet)
-	addDatabaseFlag(killFlagSet)
-	killFlagSet.IntVar(&port, "port", -1, "The local port of the session to kill.")
-	flagSets["kill"] = killFlagSet
-
-	killAllFlagSet := flag.NewFlagSet("kill-all", flag.ExitOnError)
-	addVerboseFlag(killAllFlagSet)
-	addDatabaseFlag(killAllFlagSet)
-	flagSets["kill-all"] = killAllFlagSet
-
-	restartSessionsFlagSet := flag.NewFlagSet("restart-sessions", flag.ExitOnError)
-	addVerboseFlag(restartSessionsFlagSet)
-	addDatabaseFlag(restartSessionsFlagSet)
-	addServerFlag(restartSessionsFlagSet)
-	restartSessionsFlagSet.BoolVarP(&daemonize, "daemonize", "d", false, "Start the app in the background.")
-	flagSets["restart-sessions"] = restartSessionsFlagSet
-
-	listFlagSet := flag.NewFlagSet("list", flag.ExitOnError)
-	addVerboseFlag(listFlagSet)
-	addDatabaseFlag(listFlagSet)
-	flagSets["list"] = listFlagSet
-
-	registerKeyFlagSet := flag.NewFlagSet("register-key", flag.ExitOnError)
-	addVerboseFlag(registerKeyFlagSet)
-	addServerFlag(registerKeyFlagSet)
-	registerKeyFlagSet.StringVar(&socksProxy, "proxy", "", "Socks5 proxy to use. Format: socks5://user:pass@host:port")
-	registerKeyToken := registerKeyFlagSet.String("token", "", "Token to link your machine to your account. Find this token at https://openport.io/user/keys .")
-	registerKeyName := registerKeyFlagSet.String("name", "", "The name for this machine.")
-	flagSets["register-key"] = registerKeyFlagSet
-
-	flag.Usage = myUsage
-
-	if len(args) == 1 {
-		myUsage()
-		app.exitCode <- EXIT_CODE_USAGE
-	}
-
-	switch args[1] {
-	case "help":
-		if len(args) > 2 {
-			command := args[2]
-			flagSet := flagSets[command]
-			if flagSet == nil {
-				fmt.Printf("No such command: %s\n", command)
-				myUsage()
-			} else {
-				fmt.Printf("Usage: %s %s [arguments]\n", args[0], command)
-				flagSet.PrintDefaults()
-			}
-		} else {
-			fmt.Printf("Usage: %s (<port> | forward | list | kill | kill-all | register | help )\n", args[0])
-			fmt.Printf("Default: %s <port> [arguments]\n", args[0])
-			defaultFlagSet.PrintDefaults()
-		}
-		app.exitCode <- EXIT_CODE_HELP
-	case "register-key":
-		_ = registerKeyFlagSet.Parse(args[2:])
-		initLogging()
-		tail := registerKeyFlagSet.Args()
-		if *registerKeyToken == "" {
-			if len(tail) == 0 {
-				log.Fatalf("--token is required")
-			} else {
-				registerKeyToken = &tail[0]
-			}
-		}
-		app.registerKey(*registerKeyToken, *registerKeyName, socksProxy, server)
-	case "version":
-		fmt.Println(VERSION)
-	case "kill":
-		_ = killFlagSet.Parse(args[2:])
-		initLogging()
-		utils.EnsureHomeFolderExists()
-		tail := killFlagSet.Args()
-		var err error
-		if port == -1 {
-			if len(tail) == 0 {
-				log.Fatal("port missing")
-			} else {
-				port, err = strconv.Atoi(tail[0])
-				if err != nil {
-					log.Warnf("failing: %s %s", tail, err)
-					killFlagSet.PrintDefaults()
-					app.exitCode <- EXIT_CODE_INVALID_ARGUMENT
-				}
-			}
-		}
-
-		app.dbHandler.InitDB()
-		session, err2 := app.dbHandler.GetSession(port)
-		if err2 != nil {
-			log.Fatal(err2)
-		}
-		if session.ID == 0 {
-			log.Fatal("Session not found.")
-		}
-		resp, err3 := interProcessHttpClient.Get(fmt.Sprintf("http://127.0.0.1:%d/exit", session.AppManagementPort))
-		if err3 != nil {
-			log.Fatalf("Could not kill session: %s", err3)
-		}
-		log.Debug(resp)
-	case "kill-all":
-		_ = killAllFlagSet.Parse(args[2:])
-		initLogging()
-		utils.EnsureHomeFolderExists()
-		app.dbHandler.InitDB()
-		app.killAll()
-	case "restart-sessions":
-		_ = restartSessionsFlagSet.Parse(args[2:])
-		initLogging()
-		if daemonize {
-			app.startDaemon(args)
-		} else {
-			utils.EnsureHomeFolderExists()
-			app.restartSessions(args, server, app.dbHandler.DbPath)
-		}
-	case "list":
-		_ = listFlagSet.Parse(args[2:])
-		initLogging()
-		utils.EnsureHomeFolderExists()
-		app.dbHandler.InitDB()
-		app.listSessions()
-		app.exitCode <- EXIT_CODE_LIST
-	default:
-		forwardTunnel := args[1] == "forward"
-		var remotePortInt int
-		//var sshServer string = "openport.io"
-		var err error
-		if forwardTunnel {
-			_ = defaultFlagSet.Parse(args[2:])
-			remotePortInt, err = strconv.Atoi(remotePort)
-			if err != nil {
-				parsed, err := url.Parse(remotePort)
-				if err != nil {
-					log.Fatalf("invalid format for remote-port (host:port) : %s %s", remotePort, err)
-				}
-				//sshServer = parsed.Host
-				parsedPort := parsed.Port()
-				if remotePort == "" {
-					log.Fatalf("Port missing in remote-port arg: %s", remotePort)
-				}
-				remotePortInt, _ = strconv.Atoi(parsedPort)
-				//} else {
-				//	parsed, err := url.Parse(server)
-				//	if err != nil {
-				//		log.Fatalf("invalid format for server : %s %s", server, err)
-				//	}
-				//sshServer = parsed.Host
-			}
-
-		} else {
-			_ = defaultFlagSet.Parse(args[1:])
-			remotePortInt, err = strconv.Atoi(remotePort)
-			if err != nil {
-				log.Fatalf("Remote port needs to be an integer: %s %s", remotePort, err)
-			}
-		}
-		initLogging()
-		app.exitOnFailureTimeout = exitOnFailureTimeout
-
-		tail := defaultFlagSet.Args()
-		if port == -1 {
-			if len(tail) == 0 {
-				if !forwardTunnel {
-					myUsage()
-					app.exitCode <- EXIT_CODE_INVALID_ARGUMENT
-				}
-			} else {
-				var err error
-				port, err = strconv.Atoi(tail[0])
-				if err != nil {
-					log.Warnf("failing: %s %s", tail, err)
-					defaultFlagSet.PrintDefaults()
-					app.exitCode <- EXIT_CODE_INVALID_ARGUMENT
-				}
-			}
-		}
-
-		if daemonize {
-			app.startDaemon(args)
-			return
-		}
-
-		app.Session = db.Session{
-			LocalPort:           port,
-			UseIpLinkProtection: *useIpLinkProtection,
-			HttpForward:         *httpForward,
-			Server:              server,
-			KeepAliveSeconds:    keepAliveSeconds,
-			Proxy:               socksProxy,
-			Active:              true,
-			ForwardTunnel:       forwardTunnel,
-			RemotePort:          remotePortInt,
-			SshServer:           *sshServer,
-		}
-		controlPort := app.startControlServer(controlPort)
-		app.Session.AppManagementPort = controlPort
-
-		if restartOnReboot {
-			app.Session.RestartCommand = strings.Join(args[1:], " ")
-		}
-		app.createTunnel()
-	}
-	app.exitCode <- 0
-}
-
-func (app *OpenportApp) startDaemon(args []string) {
+func (app *App) StartDaemon(args []string) {
 	// TODO: there might be an issue with this?
 	loc := Find(args, "-d")
 	var command []string
@@ -487,10 +199,10 @@ func (app *OpenportApp) startDaemon(args []string) {
 	err := cmd.Start()
 	if err != nil {
 		log.Fatal(err)
-		app.exitCode <- EXIT_CODE_DAEMONIZED_ERROR
+		app.ExitCode <- EXIT_CODE_DAEMONIZED_ERROR
 	} else {
 		log.Info("Process started in background")
-		app.exitCode <- EXIT_CODE_DAEMONIZED_OK
+		app.ExitCode <- EXIT_CODE_DAEMONIZED_OK
 	}
 }
 
@@ -503,14 +215,14 @@ func Find(a []string, x string) int {
 	return -1
 }
 
-func (app *OpenportApp) registerKey(keyBindingToken string, name string, proxy string, server string) {
+func (app *App) RegisterKey(keyBindingToken string, name string, proxy string, server string) {
 	utils.EnsureHomeFolderExists()
 	publicKey, _, err := utils.EnsureKeysExist()
 	if err != nil {
 		log.Fatalf("Could not get key: %s", err)
 	}
 
-	httpClient := getHttpClient(proxy)
+	httpClient := GetHttpClient(proxy)
 	postUrl := fmt.Sprintf("%s/linkKey", server)
 	getParameters := url.Values{
 		"public_key":        {string(publicKey)},
@@ -524,7 +236,7 @@ func (app *OpenportApp) registerKey(keyBindingToken string, name string, proxy s
 	if err != nil {
 		log.Fatalf("HTTP error: %s", err)
 	}
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatalf("Body error: %s", err)
 	}
@@ -537,14 +249,14 @@ func (app *OpenportApp) registerKey(keyBindingToken string, name string, proxy s
 	}
 	if response.Status != "ok" {
 		log.Fatalf("Could not register key: %s", response.Error)
-		app.exitCode <- EXIT_CODE_KEY_REGISTERED_FAILED
+		app.ExitCode <- EXIT_CODE_KEY_REGISTERED_FAILED
 	} else {
 		log.Info("key successfully registered")
-		app.exitCode <- EXIT_CODE_KEY_REGISTERED_OK
+		app.ExitCode <- EXIT_CODE_KEY_REGISTERED_OK
 	}
 }
 
-func sessionIsLive(session db.Session) bool {
+func SessionIsLive(session db.Session) bool {
 	url := fmt.Sprintf("http://127.0.0.1:%d/info", session.AppManagementPort)
 	log.Debug(url)
 	resp, err := interProcessHttpClient.Get(url)
@@ -553,7 +265,7 @@ func sessionIsLive(session db.Session) bool {
 		return false
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Debugf("Error while getting the body of %s: %s", url, err)
 		return false
@@ -562,7 +274,7 @@ func sessionIsLive(session db.Session) bool {
 	return string(body)[:8] == "openport"
 }
 
-func (app *OpenportApp) listSessions() {
+func (app *App) ListSessions() {
 	tw := table.NewWriter()
 	tw.SetStyle(table.StyleRounded)
 	tw.Style().Format.Header = text.FormatTitle
@@ -577,7 +289,7 @@ func (app *OpenportApp) listSessions() {
 		"Forward Tunnel",
 	})
 	tw.SetTitle("Active Openport Sessions")
-	sessions, err := app.dbHandler.GetAllActive()
+	sessions, err := app.DbHandler.GetAllActive()
 	if err != nil {
 		panic(err)
 	}
@@ -588,7 +300,7 @@ func (app *OpenportApp) listSessions() {
 			session.SshServer,
 			session.RemotePort,
 			session.OpenPortForIpLink,
-			sessionIsLive(session),
+			SessionIsLive(session),
 			session.RestartCommand != "",
 			session.ForwardTunnel,
 		})
@@ -596,9 +308,9 @@ func (app *OpenportApp) listSessions() {
 	tw.Render()
 }
 
-func (app *OpenportApp) restartSessions(args []string, server string, database string) {
-	log.Debug("Restarting Sessions")
-	sessions, err := app.dbHandler.GetSessionsToRestart()
+func (app *App) RestartSessions(appPath string, server string) {
+	log.Debugf("Restarting Sessions -> %s %s %s", appPath, server, app.DbHandler.DbPath)
+	sessions, err := app.DbHandler.GetSessionsToRestart()
 	if err != nil {
 		panic(err)
 	}
@@ -640,18 +352,18 @@ func (app *OpenportApp) restartSessions(args []string, server string, database s
 		if server != DEFAULT_SERVER {
 			restartCommand = append(restartCommand, "--server", server)
 		}
-		if database != db.OPENPORT_DB_PATH {
-			restartCommand = append(restartCommand, "--database", database)
+		if app.DbHandler.DbPath != db.DEFAULT_OPENPORT_DB_PATH {
+			restartCommand = append(restartCommand, "--database", app.DbHandler.DbPath)
 		}
-		log.Infof("Running command %s with args %s", args[0], restartCommand)
-		cmd := exec.Command(args[0], restartCommand...)
+		log.Infof("Running command %s with args %s", appPath, restartCommand)
+		cmd := exec.Command(appPath, restartCommand...)
 		err = cmd.Start()
 		if err != nil {
 			log.Warn(err)
 		}
 	}
 
-	if runtime.GOOS == "windows" {
+	if strings.Contains(runtime.GOOS, "windows") {
 		return
 	}
 
@@ -664,7 +376,7 @@ func (app *OpenportApp) restartSessions(args []string, server string, database s
 		return
 	}
 
-	buf, err := ioutil.ReadFile(USER_CONFIG_FILE)
+	buf, err := os.ReadFile(USER_CONFIG_FILE)
 	if err != nil {
 		log.Warnf("Could not read file %s: %s", USER_CONFIG_FILE, err)
 	} else {
@@ -676,7 +388,7 @@ func (app *OpenportApp) restartSessions(args []string, server string, database s
 				continue
 			}
 			if username != "" {
-				command := []string{"-u", username, "-H", args[0], "restart-sessions"}
+				command := []string{"-u", username, "-H", appPath, "restart-sessions"}
 				log.Debugf("Running command sudo %s", command)
 				cmd := exec.Command("sudo", command...)
 				err = cmd.Start()
@@ -688,8 +400,8 @@ func (app *OpenportApp) restartSessions(args []string, server string, database s
 	}
 }
 
-func (app *OpenportApp) killAll() {
-	sessions, err := app.dbHandler.GetAllActive()
+func (app *App) KillAll() {
+	sessions, err := app.DbHandler.GetAllActive()
 	if err != nil {
 		panic(err)
 	}
@@ -697,7 +409,7 @@ func (app *OpenportApp) killAll() {
 		resp, err3 := interProcessHttpClient.Get(fmt.Sprintf("http://127.0.0.1:%d/exit", session.AppManagementPort))
 		if err3 != nil {
 			session.Active = false
-			app.dbHandler.Save(&session)
+			app.DbHandler.Save(&session)
 			log.Warnf("Could not kill session for local port %d: %s", session.LocalPort, err3)
 		} else {
 			log.Infof("Killed session for local port %d", session.LocalPort)
@@ -706,7 +418,7 @@ func (app *OpenportApp) killAll() {
 	}
 }
 
-func (app *OpenportApp) stopSession(w http.ResponseWriter, r *http.Request) {
+func (app *App) StopSession(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "Ok")
 	app.Stop(EXIT_CODE_REMOTE_STOP)
 
@@ -714,11 +426,11 @@ func (app *OpenportApp) stopSession(w http.ResponseWriter, r *http.Request) {
 	// TODO: Force flag
 }
 
-func (app *OpenportApp) infoRequest(w http.ResponseWriter, r *http.Request) {
+func (app *App) InfoRequest(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "openport")
 }
 
-func (app *OpenportApp) startControlServer(controlPort int) int {
+func (app *App) StartControlServer(controlPort int) int {
 	if controlPort <= 0 {
 		var err error
 		controlPort, err = freeport.GetFreePort()
@@ -727,14 +439,14 @@ func (app *OpenportApp) startControlServer(controlPort int) int {
 		}
 	}
 	router := mux.NewRouter().StrictSlash(true)
-	router.HandleFunc("/exit", app.stopSession)
-	router.HandleFunc("/info", app.infoRequest)
+	router.HandleFunc("/exit", app.StopSession)
+	router.HandleFunc("/info", app.InfoRequest)
 	log.Debugf("Listening for control on port %d", controlPort)
 	go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", controlPort), router)
 	return controlPort
 }
 
-func handleSignals(app *OpenportApp) {
+func HandleSignals(app *App) {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT)
 	restartMessage := ""
@@ -749,7 +461,7 @@ func handleSignals(app *OpenportApp) {
 	}()
 }
 
-func checkUsernameInConfigFile() {
+func CheckUsernameInConfigFile() {
 
 	if runtime.GOOS == "windows" {
 		return
@@ -785,18 +497,18 @@ func checkUsernameInConfigFile() {
 	}
 }
 
-func (app *OpenportApp) createTunnel() {
+func (app *App) CreateTunnel() {
 	if app.Session.RestartCommand != "" {
-		checkUsernameInConfigFile()
+		CheckUsernameInConfigFile()
 	}
-	handleSignals(app)
+	HandleSignals(app)
 	publicKey, key, err := utils.EnsureKeysExist()
 	if err != nil {
 		log.Fatalf("Error during fetching/creating key: %s", err)
 	}
-	app.dbHandler.InitDB()
-	dbSession := app.dbHandler.EnrichSessionWithHistory(&app.Session)
-	if dbSession.ID > 0 && sessionIsLive(dbSession) {
+	app.DbHandler.InitDB()
+	dbSession := app.DbHandler.EnrichSessionWithHistory(&app.Session)
+	if dbSession.ID > 0 && SessionIsLive(dbSession) {
 		log.Fatalf("Port forward already running for port %d with PID %d",
 			dbSession.LocalPort, dbSession.Pid)
 	}
@@ -807,16 +519,16 @@ func (app *OpenportApp) createTunnel() {
 		}
 	}
 	app.Session.Active = true
-	err = app.dbHandler.Save(&app.Session)
+	err = app.DbHandler.Save(&app.Session)
 	if err != nil {
 		log.Warnf("error saving session: %s", err)
 	}
-	defer app.setInactive(&app.Session)
+	defer app.SetInactive(&app.Session)
 
-	go app.connectedState.DoState()
+	go app.ConnectedState.DoState()
 
 	for {
-		response, err2 := app.requestPortForward(&app.Session, publicKey)
+		response, err2 := app.RequestPortForward(&app.Session, publicKey)
 		if err2 != nil {
 			log.Error(err2)
 			log.Infof("Will sleep for %f seconds", httpSleeper.SleepTime.Seconds())
@@ -827,22 +539,25 @@ func (app *OpenportApp) createTunnel() {
 
 		var err error
 		if app.Session.ForwardTunnel {
-			err = app.startForwardTunnel(key, app.Session, response.Message)
+			err = app.StartForwardTunnel(key, app.Session, response.Message)
 		} else {
 
-			//// TMP!!!!
-			//wsClient := ws_channel.NewWSClient()
-			//
-			//server := strings.Replace(app.Session.Server, "https://", "wss://", 1)
-			//err = wsClient.Connect(server)
-			//if err != nil {
-			//	log.Fatalf("Could not connect to server %s: %s", server, err)
-			//}
-			//err = wsClient.StartReverseTunnel(app.Session.SessionToken, app.Session.LocalPort, app.Session.RemotePort)
-			//
-			err = app.startReverseTunnel(key, app.Session, response.Message)
+			if 1 == 0 {
+				//// TMP!!!!
+				wsClient := ws_channel.NewWSClient()
+
+				server := fmt.Sprintf("wss://%s", app.Session.SshServer)
+				log.Debugf("Connecting to %s", server)
+				err = wsClient.Connect(server)
+				if err != nil {
+					log.Fatalf("Could not connect to server %s: %s", server, err)
+				}
+				err = wsClient.StartReverseTunnel(app.Session, response.Message)
+			} else {
+				err = app.StartReverseTunnel(key, app.Session, response.Message)
+			}
 		}
-		if !app.stopped {
+		if !app.Stopped {
 			app.MarkDisconnected()
 			log.Warn(err)
 			if app.Session.AutomaticRestart {
@@ -855,20 +570,20 @@ func (app *OpenportApp) createTunnel() {
 	}
 }
 
-func (app *OpenportApp) Stop(exitCode int) {
-	if app.stopped {
+func (app *App) Stop(exitCode int) {
+	if app.Stopped {
 		return
 	}
-	app.stopped = true
+	app.Stopped = true
 	log.Debug("Stopping app")
-	for i := app.stopHooks.Front(); i != nil; i = i.Next() {
+	for i := app.StopHooks.Front(); i != nil; i = i.Next() {
 		i.Value.(func())()
 	}
-	app.exitCode <- exitCode
-	//app.setInactive(app.Session)
+	app.ExitCode <- exitCode
+	//app.SetInactive(app.Session)
 }
 
-func getHttpClient(proxy string) http.Client {
+func GetHttpClient(proxy string) http.Client {
 	if proxy == "" {
 		return http.Client{}
 	} else {
@@ -887,8 +602,8 @@ func getHttpClient(proxy string) http.Client {
 	}
 }
 
-func (app *OpenportApp) requestPortForward(session *db.Session, publicKey []byte) (PortResponse, error) {
-	httpClient := getHttpClient(session.Proxy)
+func (app *App) RequestPortForward(session *db.Session, publicKey []byte) (PortResponse, error) {
+	httpClient := GetHttpClient(session.Proxy)
 
 	postUrl := fmt.Sprintf("%s/api/v1/request-port", session.Server)
 	getParameters := url.Values{
@@ -935,8 +650,8 @@ func (app *OpenportApp) requestPortForward(session *db.Session, publicKey []byte
 	if response.Error != "" {
 		if response.FatalError {
 			log.Infof("Stopping session on request of server: %s", response.Error)
-			app.setInactive(session)
-			app.exitCode <- EXIT_CODE_FATAL_SESSION_ERROR
+			app.SetInactive(session)
+			app.ExitCode <- EXIT_CODE_FATAL_SESSION_ERROR
 		}
 		return PortResponse{}, ServerResponseError{response.Error}
 	}
@@ -952,7 +667,7 @@ func (app *OpenportApp) requestPortForward(session *db.Session, publicKey []byte
 	session.OpenPortForIpLink = response.OpenPortForIpLink
 	session.FallbackSshServerIp = response.FallbackSshServerIp
 	session.FallbackSshServerPort = response.FallbackSshServerPort
-	err = app.dbHandler.Save(session)
+	err = app.DbHandler.Save(session)
 
 	if err != nil {
 		log.Warn(err)
@@ -960,14 +675,14 @@ func (app *OpenportApp) requestPortForward(session *db.Session, publicKey []byte
 	return response, nil
 }
 
-func (app *OpenportApp) startReverseTunnel(key ssh.Signer, session db.Session, message string) error {
-	sshClient, keepAliveDone, err2 := connect(key, session)
+func (app *App) StartReverseTunnel(key ssh.Signer, session db.Session, message string) error {
+	sshClient, keepAliveDone, err2 := Connect(key, session)
 	if err2 != nil {
 		return err2
 	}
 	defer func() { keepAliveDone <- true }()
 
-	log.Debugf("connected")
+	log.Debugf("Connected")
 	s := fmt.Sprintf("0.0.0.0:%d", session.RemotePort)
 	addr, err := net.ResolveTCPAddr("tcp", s)
 	if err != nil {
@@ -980,22 +695,16 @@ func (app *OpenportApp) startReverseTunnel(key ssh.Signer, session db.Session, m
 		return err
 	}
 	defer listener.Close()
-	if session.HttpForward {
-		log.Infof("Now forwarding remote address %s to localhost", session.HttpForwardAddress)
-	} else {
-		log.Infof("Now forwarding remote port %s:%d to localhost:%d", session.SshServer, session.RemotePort, session.LocalPort)
-	}
-
+	session.PrintMessage(message)
 	// ExitHook
 	stopFunc := func() {
 		log.Debug("Closing ssh connection and listeners")
 		sshClient.Close()
 		listener.Close()
 	}
-	stopFuncRef := app.stopHooks.PushBack(stopFunc)
-	defer app.stopHooks.Remove(stopFuncRef)
+	stopFuncRef := app.StopHooks.PushBack(stopFunc)
+	defer app.StopHooks.Remove(stopFuncRef)
 
-	log.Infof(message)
 	app.MarkConnected()
 
 	for {
@@ -1025,7 +734,7 @@ func (app *OpenportApp) startReverseTunnel(key ssh.Signer, session db.Session, m
 	}
 }
 
-func connect(key ssh.Signer, session db.Session) (*ssh.Client, chan bool, error) {
+func Connect(key ssh.Signer, session db.Session) (*ssh.Client, chan bool, error) {
 	config := &ssh.ClientConfig{
 		User: "open",
 		Auth: []ssh.AuthMethod{
@@ -1093,11 +802,11 @@ func connect(key ssh.Signer, session db.Session) (*ssh.Client, chan bool, error)
 	}
 
 	keepAliveDone := make(chan bool, 1)
-	go keepAlive(sshClient, time.Duration(int64(session.KeepAliveSeconds)*int64(time.Second)), keepAliveDone)
+	go KeepAlive(sshClient, time.Duration(int64(session.KeepAliveSeconds)*int64(time.Second)), keepAliveDone)
 	return sshClient, keepAliveDone, nil
 }
 
-func keepAlive(cl *ssh.Client, keepAliveInterval time.Duration, done <-chan bool) {
+func KeepAlive(cl *ssh.Client, keepAliveInterval time.Duration, done <-chan bool) {
 	t := time.NewTicker(keepAliveInterval)
 	defer t.Stop()
 	for {
@@ -1113,8 +822,8 @@ func keepAlive(cl *ssh.Client, keepAliveInterval time.Duration, done <-chan bool
 	}
 }
 
-func (app *OpenportApp) startForwardTunnel(key ssh.Signer, session db.Session, msg string) error {
-	sshClient, keepAliveDone, err2 := connect(key, session)
+func (app *App) StartForwardTunnel(key ssh.Signer, session db.Session, msg string) error {
+	sshClient, keepAliveDone, err2 := Connect(key, session)
 	if err2 != nil {
 		return err2
 	}
@@ -1132,8 +841,8 @@ func (app *OpenportApp) startForwardTunnel(key ssh.Signer, session db.Session, m
 		sshClient.Close()
 		listener.Close()
 	}
-	stopFuncRef := app.stopHooks.PushBack(stopFunc)
-	defer app.stopHooks.Remove(stopFuncRef)
+	stopFuncRef := app.StopHooks.PushBack(stopFunc)
+	defer app.StopHooks.Remove(stopFuncRef)
 
 	log.Info(msg)
 	app.MarkConnected()
@@ -1145,6 +854,24 @@ func (app *OpenportApp) startForwardTunnel(key ssh.Signer, session db.Session, m
 		log.Debugf("Incoming request on forward tunnel from %s", conn.RemoteAddr())
 		go handleRequestOnForwardTunnel(sshClient, conn, session)
 	}
+}
+
+func (app *App) KillSession(port int) {
+	log.Debugf("Killing session on port %d", port)
+
+	app.DbHandler.InitDB()
+	session, err2 := app.DbHandler.GetSession(port)
+	if err2 != nil {
+		log.Fatal(err2)
+	}
+	if session.ID == 0 {
+		log.Fatal("Session not found.")
+	}
+	resp, err3 := interProcessHttpClient.Get(fmt.Sprintf("http://127.0.0.1:%d/exit", session.AppManagementPort))
+	if err3 != nil {
+		log.Fatalf("Could not kill session: %s", err3)
+	}
+	log.Debug(resp)
 }
 
 func handleRequestOnForwardTunnel(sshClient *ssh.Client, localConn net.Conn, session db.Session) {
@@ -1171,9 +898,9 @@ func handleRequestOnForwardTunnel(sshClient *ssh.Client, localConn net.Conn, ses
 	return
 }
 
-func (app *OpenportApp) setInactive(session *db.Session) {
+func (app *App) SetInactive(session *db.Session) {
 	session.Active = false
-	app.dbHandler.Save(session)
+	app.DbHandler.Save(session)
 }
 
 type ConnectionState interface {
@@ -1182,20 +909,20 @@ type ConnectionState interface {
 }
 
 type ConnectedState struct {
-	app *OpenportApp
+	app *App
 }
 
 func (state *ConnectedState) DoState() {
 	for {
-		connected := <-state.app.connected
-		log.Debugf("connected state: got connected:  %t", connected)
+		connected := <-state.app.Connected
+		log.Debugf("Connected state: got Connected:  %t", connected)
 		if connected {
 			continue
 		} else {
-			state.app.connectedState = &DisconnectedState{
+			state.app.ConnectedState = &DisconnectedState{
 				app: state.app,
 			}
-			go state.app.connectedState.DoState()
+			go state.app.ConnectedState.DoState()
 			break
 		}
 	}
@@ -1206,14 +933,14 @@ func (state *ConnectedState) IsConnected() bool {
 }
 
 type DisconnectedState struct {
-	app *OpenportApp
+	app *App
 }
 
 func (state *DisconnectedState) DoState() {
 
 	var timeoutChannel <-chan time.Time
-	if state.app.exitOnFailureTimeout > 0 {
-		timeoutChannel = time.After(time.Duration(state.app.exitOnFailureTimeout) * time.Second)
+	if state.app.ExitOnFailureTimeout > 0 {
+		timeoutChannel = time.After(time.Duration(state.app.ExitOnFailureTimeout) * time.Second)
 	} else {
 		// Hangs forever
 		timeoutChannel = make(chan time.Time, 1)
@@ -1221,21 +948,21 @@ func (state *DisconnectedState) DoState() {
 
 	select {
 	case <-timeoutChannel:
-		log.Errorf("Not connected for %d seconds, exiting.", state.app.exitOnFailureTimeout)
-		state.app.exitCode <- EXIT_CODE_NO_CONNECTION
-	case connected := <-state.app.connected:
-		log.Debugf("disconnected state: got connected:  %t", connected)
+		log.Errorf("Not Connected for %d seconds, exiting.", state.app.ExitOnFailureTimeout)
+		state.app.ExitCode <- EXIT_CODE_NO_CONNECTION
+	case connected := <-state.app.Connected:
+		log.Debugf("disconnected state: got Connected:  %t", connected)
 		if connected {
-			state.app.connectedState = &ConnectedState{
+			state.app.ConnectedState = &ConnectedState{
 				app: state.app,
 			}
 		} else {
 			log.Errorf("Should not get an update about disconnected when already in the disconnected state. This is most likely a bug.")
-			state.app.connectedState = &DisconnectedState{
+			state.app.ConnectedState = &DisconnectedState{
 				app: state.app,
 			}
 		}
-		go state.app.connectedState.DoState()
+		go state.app.ConnectedState.DoState()
 	}
 }
 
@@ -1243,12 +970,12 @@ func (state *DisconnectedState) IsConnected() bool {
 	return false
 }
 
-func (app *OpenportApp) MarkDisconnected() {
-	if app.connectedState.IsConnected() {
-		app.connected <- false
+func (app *App) MarkDisconnected() {
+	if app.ConnectedState.IsConnected() {
+		app.Connected <- false
 	}
 }
 
-func (app *OpenportApp) MarkConnected() {
-	app.connected <- true
+func (app *App) MarkConnected() {
+	app.Connected <- true
 }

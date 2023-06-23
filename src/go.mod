@@ -8,12 +8,14 @@ require (
 	github.com/erikstmartin/go-testdb v0.0.0-20160219214506-8d10e4a1bae5 // indirect
 	github.com/go-openapi/strfmt v0.19.5 // indirect
 	github.com/go-sql-driver/mysql v1.4.1 // indirect
+	github.com/gobwas/ws v1.1.0
 	github.com/gofrs/uuid v3.3.0+incompatible // indirect
 	github.com/gorilla/mux v1.7.4
 	github.com/jedib0t/go-pretty v4.3.0+incompatible
 	github.com/jinzhu/gorm v1.9.2
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.0.1 // indirect
+	github.com/judwhite/go-svc v1.2.1
 	github.com/kisielk/og-rek v1.1.0
 	github.com/lib/pq v1.1.1 // indirect
 	github.com/mattn/go-runewidth v0.0.9 // indirect

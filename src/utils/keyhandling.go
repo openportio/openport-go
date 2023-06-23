@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/user"
+	"path"
 )
 
 func GetHomeDir() string {
@@ -24,12 +25,12 @@ func GetHomeDir() string {
 
 var HOMEDIR = GetHomeDir()
 
-var OPENPORT_HOME = HOMEDIR + "/.openport"
-var OPENPORT_PRIVATE_KEY_PATH = OPENPORT_HOME + "/id_rsa"
-var OPENPORT_PUBLIC_KEY_PATH = OPENPORT_HOME + "/id_rsa.pub"
+var OPENPORT_HOME = path.Join(HOMEDIR, ".openport")
+var OPENPORT_PRIVATE_KEY_PATH = path.Join(OPENPORT_HOME, "id_rsa")
+var OPENPORT_PUBLIC_KEY_PATH = path.Join(OPENPORT_HOME, "id_rsa.pub")
 
-var SSH_PRIVATE_KEY_PATH = HOMEDIR + "/.ssh/id_rsa"
-var SSH_PUBLIC_KEY_PATH = HOMEDIR + "/.ssh/id_rsa.pub"
+var SSH_PRIVATE_KEY_PATH = path.Join(HOMEDIR, ".ssh", "id_rsa")
+var SSH_PUBLIC_KEY_PATH = path.Join(HOMEDIR, ".ssh", "id_rsa.pub")
 
 func CreateKeys() ([]byte, ssh.Signer, error) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)

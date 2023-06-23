@@ -1,4 +1,4 @@
-package main
+package openport
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-func assertEqual(t *testing.T, a interface{}, b interface{}) {
+func AssertEqual(t *testing.T, a interface{}, b interface{}) {
 	if a != b {
 		debug.PrintStack()
 		t.Fatalf("%s != %s", a, b)
@@ -72,7 +72,7 @@ func CheckTcpForward(t *testing.T, localPort int, server string, remotePort int)
 	defer resp.Body.Close()
 	responseBody, err := ioutil.ReadAll(resp.Body)
 	failIfError(t, err)
-	assertEqual(t, "hello", strings.TrimSpace(string(responseBody)))
+	AssertEqual(t, "hello", strings.TrimSpace(string(responseBody)))
 
 	// Test Remote Server
 	resp, err = httpClient.Get(fmt.Sprintf("http://%s:%d", server, remotePort))
@@ -80,7 +80,7 @@ func CheckTcpForward(t *testing.T, localPort int, server string, remotePort int)
 	defer resp.Body.Close()
 	responseBody, err = ioutil.ReadAll(resp.Body)
 	failIfError(t, err)
-	assertEqual(t, "hello", strings.TrimSpace(string(responseBody)))
+	AssertEqual(t, "hello", strings.TrimSpace(string(responseBody)))
 
 }
 
@@ -98,7 +98,7 @@ func CheckTcpForwardFails(t *testing.T, localPort int, server string, remotePort
 	}
 }
 
-func waitForApp(t *testing.T, app *OpenportApp) {
+func WaitForApp(t *testing.T, app *App) {
 	appReady := make(chan string, 1)
 
 	go func() {
@@ -117,7 +117,7 @@ func waitForApp(t *testing.T, app *OpenportApp) {
 	}
 }
 
-func timeoutFunction(t *testing.T, f func() string, timeout time.Duration) string {
+func TimeoutFunction(t *testing.T, f func() string, timeout time.Duration) string {
 	appReady := make(chan string, 1)
 
 	var result string
@@ -136,13 +136,13 @@ func timeoutFunction(t *testing.T, f func() string, timeout time.Duration) strin
 	return result
 }
 
-func getFreePort(t *testing.T) int {
+func GetFreePort(t *testing.T) int {
 	port, err := freeport.GetFreePort()
 	failIfError(t, err)
 	return port
 }
 
-func defaultEnv(key string, deflt string) string {
+func DefaultEnv(key string, deflt string) string {
 	result := deflt
 	if os.Getenv(key) != "" {
 		result = os.Getenv(key)

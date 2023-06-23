@@ -32,4 +32,4 @@ RUN go mod download
 RUN apt-get install -y curl
 
 COPY src/ /apps/go/
-RUN go build -o openport-armhf main.go
+RUN go build -o /openport-armhf apps/openport/main.go
