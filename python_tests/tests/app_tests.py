@@ -77,7 +77,7 @@ class AppTests(unittest.TestCase):
     kill = "kill"
     kill_all = "kill-all"
     version = "version"
-    app_version = "2.1.0"
+    app_version = "2.1.1"
     forward = "forward"
     list = "list"
 
@@ -164,11 +164,8 @@ class AppTests(unittest.TestCase):
         remote_host, remote_port, link = get_remote_host_and_port(p, self.osinteraction)
         self.check_application_is_still_alive(p)
         click_open_for_ip_link(link)
-
         #        self.assertEqual(1, get_nr_of_shares_in_db_file(self.db_file))
-
         #        self.assertFalse(openportmanager.manager_is_running(8001))
-
         check_tcp_port_forward(
             self, remote_host=remote_host, local_port=port, remote_port=remote_port
         )

@@ -25,4 +25,4 @@ RUN go mod download
 
 COPY src/ /apps/go/
 
-RUN go build -o openport-amd64 main.go
+RUN go build -o /openport-amd64 apps/openport/main.go

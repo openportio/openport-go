@@ -34,4 +34,4 @@ ENV CC_FOR_TARGET=aarch64-linux-gnu-gcc
 RUN go mod download
 
 COPY src/ /apps/go/
-RUN go build -o openport-arm64 main.go
+RUN go build -o /openport-arm64 apps/openport/main.go
