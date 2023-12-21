@@ -28,7 +28,7 @@ logger = get_logger(__name__)
 TEST_FILES_PATH = Path(__file__).parent / "testfiles"
 
 
-class HTTPServerForTests(object):
+class HTTPServerForTests:
     def __init__(self, port):
         self.server = HTTPServer(("", port), HTTPRequestHandlerForTests)
         self.requests = []
@@ -82,7 +82,7 @@ class HTTPRequestHandlerForTests(BaseHTTPRequestHandler):
         self.wfile.write(response)
 
 
-class SimpleHTTPClient(object):
+class SimpleHTTPClient:
     def get(self, url, print500=True):
         logger.debug("sending get request " + url)
         try:
@@ -98,7 +98,7 @@ class SimpleHTTPClient(object):
             raise
 
 
-class SimpleTcpServer(object):
+class SimpleTcpServer:
     def __init__(self, port):
         self.HOST = "127.0.0.1"  # Symbolic name meaning the local host
         self.PORT = port
@@ -132,15 +132,14 @@ class SimpleTcpServer(object):
         except Exception as e:
             logger.exception(e)
 
-    def runThreaded(self):
+    def run_threaded(self):
         import threading
 
-        thr = threading.Thread(target=self.run, args=())
-        thr.setDaemon(True)
+        thr = threading.Thread(target=self.run, args=(), daemon=True)
         thr.start()
 
 
-class SimpleTcpClient(object):
+class SimpleTcpClient:
     def __init__(self, host, port):
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -223,7 +222,7 @@ def run_command_with_timeout(args, timeout_s):
 
 
 def run_command_with_timeout_return_process(args, timeout_s):
-    class Command(object):
+    class Command:
         def __init__(self, cmd):
             self.cmd = cmd
             self.process = None
@@ -412,7 +411,7 @@ def check_tcp_port_forward(
     return_server.append(s)
     servers[local_port] = s
     try:
-        s.runThreaded()
+        s.run_threaded()
         # Connect to local service directly
         cl = SimpleTcpClient("127.0.0.1", local_port)
         response = cl.send(text).strip()

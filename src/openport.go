@@ -18,7 +18,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/writer"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/net/proxy"
 	"io"
 	"io/ioutil"
 	"net"
@@ -37,7 +36,7 @@ import (
 	"time"
 )
 
-const VERSION = "2.1.1"
+const VERSION = "2.2.0"
 const USER_CONFIG_FILE = "/etc/openport/users.conf"
 const DEFAULT_SERVER = "https://openport.io"
 
@@ -542,17 +541,19 @@ func (app *App) CreateTunnel() {
 			err = app.StartForwardTunnel(key, app.Session, response.Message)
 		} else {
 
-			if 1 == 0 {
-				//// TMP!!!!
+			if app.Session.UseWS {
 				wsClient := ws_channel.NewWSClient()
-
-				server := fmt.Sprintf("wss://%s", app.Session.SshServer)
-				log.Debugf("Connecting to %s", server)
-				err = wsClient.Connect(server)
-				if err != nil {
-					log.Fatalf("Could not connect to server %s: %s", server, err)
+				protocol := "wss"
+				if app.Session.NoSSL {
+					protocol = "ws"
 				}
-				err = wsClient.StartReverseTunnel(app.Session, response.Message)
+				primaryServer := fmt.Sprintf("%s://%s/ws", protocol, app.Session.SshServer)
+				fallbackServer := fmt.Sprintf("%s://%s/ws", protocol, app.Session.FallbackSshServerIp)
+				log.Debugf("Connecting to %s", primaryServer)
+				err = wsClient.Connect(primaryServer, fallbackServer, app.Session.Proxy)
+				if err == nil {
+					err = wsClient.StartReverseTunnel(app.Session, response.Message)
+				}
 			} else {
 				err = app.StartReverseTunnel(key, app.Session, response.Message)
 			}
@@ -749,40 +750,9 @@ func Connect(key ssh.Signer, session db.Session) (*ssh.Client, chan bool, error)
 	sshAddress := fmt.Sprintf("%s:%d", session.SshServer, 22)
 	fallbackSshAddress := fmt.Sprintf("%s:%d", session.FallbackSshServerIp, session.FallbackSshServerPort)
 	if session.Proxy != "" {
-		// create a socks5 dialer
-		u, err := url.Parse(session.Proxy)
+		conn, sshAddress, err := utils.GetProxyConn(session.Proxy, sshAddress, fallbackSshAddress)
 		if err != nil {
-			log.Fatalf("Could not parse proxy server: %s", err)
-		}
-		var proxyAuth *proxy.Auth = nil
-		proxyPassword, proxyPasswordSet := u.User.Password()
-		if proxyPasswordSet {
-			proxyAuth = &proxy.Auth{
-				User:     u.User.Username(),
-				Password: proxyPassword,
-			}
-		}
-		log.Debug(u)
-		var proxyPort = u.Port()
-		if proxyPort == "" {
-			proxyPort = "1080"
-		}
-		proxyServer := fmt.Sprintf("%s:%s", u.Hostname(), proxyPort)
-		log.Debug("proxy Server: ", proxyServer)
-
-		proxyDialer, err := proxy.SOCKS5("tcp", proxyServer, proxyAuth, proxy.Direct)
-		if err != nil {
-			log.Warnf("can't connect to the proxy: %s", err)
 			return nil, nil, err
-		}
-		conn, err := proxyDialer.Dial("tcp", sshAddress)
-		if err != nil {
-			log.Debugf("%s -> falling back to %s", err, fallbackSshAddress)
-			sshAddress = fallbackSshAddress
-			conn, err = proxyDialer.Dial("tcp", sshAddress)
-			if err != nil {
-				return nil, nil, err
-			}
 		}
 		c, chans, reqs, err := ssh.NewClientConn(conn, sshAddress, config)
 		if err != nil {

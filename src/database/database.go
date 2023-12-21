@@ -38,6 +38,8 @@ type Session struct {
 	FallbackSshServerIp   string `gorm:"-"`
 	FallbackSshServerPort int    `gorm:"-"`
 	AutomaticRestart      bool   `gorm:"-"`
+	UseWS                 bool
+	NoSSL                 bool
 }
 
 func (s Session) PrintMessage(message string) {

@@ -9,7 +9,8 @@ ENV OPENPORT_EXE=/openport-amd64
 ENV TOXI_PROXY_HOST=toxiproxy
 ENV OPENPORT_TEST_HOST=openport-test
 ENV SOCKS_PROXY=proxy-no-password
-COPY --from=builder /apps/go/openport-amd64 /openport-amd64
+
+COPY --from=builder /openport-amd64 /openport-amd64
 
 ADD . /apps/openport
 CMD python tests/run_tests.py
