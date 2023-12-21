@@ -1,63 +1,46 @@
 package ws_channel
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
-	"github.com/gobwas/ws"
-	"github.com/gobwas/ws/wsutil"
+	"github.com/gorilla/websocket"
 	"github.com/openportio/openport-go/database"
-	"github.com/openportio/openport-go/utils"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 )
 
 type WSClient struct {
-	wsConn *net.Conn
+	wsConn *websocket.Conn
 }
 
 func (client *WSClient) Connect(primaryServer string, fallbackServer string, proxyStr string) error {
-	host := primaryServer
+	dialer := websocket.DefaultDialer
 	if proxyStr != "" {
-		log.Debug("Connecting via proxy: ", proxyStr)
-		u1, err := url.Parse(primaryServer)
-		if err != nil {
-			return err
+		dialer = &websocket.Dialer{
+			Proxy: func(*http.Request) (*url.URL, error) {
+				proxyUrl, err := url.Parse(proxyStr)
+				if err != nil {
+					return nil, err
+				}
+				return proxyUrl, nil
+			},
 		}
-		u2, err := url.Parse(fallbackServer)
-		if err != nil {
-			return err
-		}
-		port := 443
-		if u1.Scheme == "ws" {
-			port = 80
-		}
-		primaryAddr := fmt.Sprintf("%s:%d", u1.Host, port)
-		fallbackAddr := fmt.Sprintf("%s:%d", u2.Host, port)
-		log.Debug("Connecting to primary server: ", primaryAddr)
-		log.Debug("Connecting to fallback server: ", fallbackAddr)
-		conn, usedHost, err := utils.GetProxyConn(proxyStr, primaryAddr, fallbackAddr)
-		if err != nil {
-			return err
-		}
-		client.wsConn = &conn
-		if usedHost == primaryAddr {
-			ws.DefaultDialer.Upgrade(*client.wsConn, u1)
-		} else {
-			ws.DefaultDialer.Upgrade(*client.wsConn, u2)
-		}
-	} else {
-		wsConn, _, _, err := ws.DefaultDialer.Dial(context.Background(), host)
-		if err != nil {
-			return err
-		}
-		client.wsConn = &wsConn
 	}
 
+	wsConn, _, err := dialer.Dial(primaryServer, nil)
+	if err != nil {
+		log.Debug("Could not connect to primary server: ", err)
+		log.Debug("Trying fallback server: ", fallbackServer)
+		wsConn, _, err = dialer.Dial(fallbackServer, nil)
+		if err != nil {
+			return err
+		}
+	}
+	client.wsConn = wsConn
 	log.Debug("Connected to server")
 	return nil
 }
@@ -95,8 +78,8 @@ func (client *WSClient) ForwardPort(localPort int) {
 				// Write responses to websocket conn
 				for {
 					byts := make([]byte, 4096) // todo buffer
-					len, err := (*channel.NetConn).Read(byts)
-					log.Tracef("Got message from conn: %d", len)
+					length, err := (*channel.NetConn).Read(byts)
+					log.Tracef("Got message from conn: %d", length)
 
 					if err != nil {
 						if err != io.EOF {
@@ -108,7 +91,7 @@ func (client *WSClient) ForwardPort(localPort int) {
 						}
 						return
 					}
-					err = channel.Send(byts[:len])
+					err = channel.Send(byts[:length])
 					if err != nil {
 						if err != io.EOF {
 							log.Error("Could not send to the websocket: ", err)
@@ -168,7 +151,7 @@ func (client *WSClient) InitForward(token string, remotePort int) error {
 		return err
 	}
 
-	err = wsutil.WriteClientText(*client.wsConn, jsonRequest)
+	err = client.wsConn.WriteMessage(websocket.TextMessage, jsonRequest)
 	if err != nil {
 		log.Error("Could not write tunnel request: ", err)
 		return err

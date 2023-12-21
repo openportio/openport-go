@@ -3,7 +3,7 @@ package ws_channel
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/gobwas/ws/wsutil"
+	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
 	"net"
 )
@@ -23,8 +23,8 @@ const (
 type Channel struct {
 	IP          [4]byte // TODO: change to netip.Addr
 	Port        uint16
-	WSConn      *net.Conn // websocket connection between the client and server
-	NetConn     *net.Conn // Connection on listener on the server side, and connection to the local server on the client side
+	WSConn      *websocket.Conn // websocket connection between the client and server
+	NetConn     *net.Conn       // Connection on listener on the server side, and connection to the local server on the client side
 	QuitChannel chan bool
 	channelType ChannelType
 }
@@ -60,11 +60,7 @@ func (c *Channel) GetHeader() []byte {
 
 func (c *Channel) Write(newMsg []byte) error {
 	log.Trace("sending a packet to the websocket ", c.GetKey(), newMsg)
-	if c.channelType == ClientChannelType {
-		return wsutil.WriteClientBinary(*c.WSConn, newMsg)
-	} else {
-		return wsutil.WriteServerBinary(*c.WSConn, newMsg)
-	}
+	return c.WSConn.WriteMessage(websocket.BinaryMessage, newMsg) // client message
 }
 func (c *Channel) Close() error {
 	newMsg := c.getPayload(ChOpClose, []byte(""))
@@ -82,12 +78,12 @@ func (c *Channel) getPayload(chop ChOp, msg []byte) []byte {
 	return append(append(c.GetHeader(), byte(chop)), msg...) // TODO: not very efficient?
 }
 
-func ChannelFromServerMessage(wsConn *net.Conn) (*Channel, []byte, ChOp, error) {
-	msg, _, err := wsutil.ReadServerData(*wsConn)
+func ChannelFromServerMessage(wsConn *websocket.Conn) (*Channel, []byte, ChOp, error) {
+	_, msg, err := wsConn.ReadMessage()
 	return ChannelFromMsg(err, msg, wsConn, ClientChannelType)
 }
 
-func ChannelFromMsg(err error, msg []byte, wsConn *net.Conn, channelType ChannelType) (*Channel, []byte, ChOp, error) {
+func ChannelFromMsg(err error, msg []byte, wsConn *websocket.Conn, channelType ChannelType) (*Channel, []byte, ChOp, error) {
 	if err != nil {
 		return nil, nil, ChOpUnknown, err
 	}
