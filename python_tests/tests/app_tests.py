@@ -77,13 +77,15 @@ class AppTests(unittest.TestCase):
     kill = "kill"
     kill_all = "kill-all"
     version = "version"
-    app_version = "2.1.1"
+    app_version = "2.2.0"
     forward = "forward"
     list = "list"
+    ws_options = []
 
     @classmethod
     def setUpClass(cls):
         if os.environ.get("BUILD_OPENPORT_EXE", "1") == "1":
+            print("building openport executable")
             exit_code, output = subprocess.getstatusoutput(
                 str(openport_go_dir / "compile.sh")
             )
@@ -156,7 +158,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -195,7 +198,8 @@ class AppTests(unittest.TestCase):
                     "--verbose",
                     "--database",
                     self.db_file,
-                ],
+                ]
+                + self.ws_options,
                 stderr=subprocess.PIPE,
                 stdout=subprocess.PIPE,
             )
@@ -233,7 +237,8 @@ class AppTests(unittest.TestCase):
                 "--database",
                 self.db_file,
                 "--daemonize",
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -273,7 +278,8 @@ class AppTests(unittest.TestCase):
 
         p = subprocess.Popen(
             self.openport_exe
-            + ["--local-port", "%s" % port, "--verbose", "--database", self.db_file],
+            + ["--local-port", "%s" % port, "--verbose", "--database", self.db_file]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -303,7 +309,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -344,7 +351,8 @@ class AppTests(unittest.TestCase):
                 "False",
                 "--keep-alive",
                 "5",
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -370,6 +378,7 @@ class AppTests(unittest.TestCase):
                     "--keep-alive",
                     "5",
                 ]
+                + self.ws_options
             ],
             share.restart_command,
         )
@@ -388,7 +397,8 @@ class AppTests(unittest.TestCase):
                 TEST_SERVER,
                 "--proxy",
                 "socks5://jan:db@1.2.3.4:5555",
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -413,6 +423,7 @@ class AppTests(unittest.TestCase):
                     "--proxy",
                     "socks5://jan:db@1.2.3.4:5555",
                 ]
+                + self.ws_options
             ],
             share.restart_command,
         )
@@ -428,7 +439,8 @@ class AppTests(unittest.TestCase):
                 self.db_file,
                 "--server",
                 TEST_SERVER,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -447,6 +459,7 @@ class AppTests(unittest.TestCase):
                     "--server",
                     TEST_SERVER,
                 ]
+                + self.ws_options
             ],
             share.restart_command,
         )
@@ -463,7 +476,8 @@ class AppTests(unittest.TestCase):
                 TEST_SERVER,
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -491,7 +505,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--remote-port",
                 str(remote_port),
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -515,7 +530,8 @@ class AppTests(unittest.TestCase):
                 TEST_SERVER,
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -537,7 +553,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--remote-port",
                 str(remote_port),
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -564,7 +581,8 @@ class AppTests(unittest.TestCase):
                 TEST_SERVER,
                 "--database",
                 str(self.db_file),
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -692,10 +710,9 @@ class AppTests(unittest.TestCase):
         return p_forward_tunnel
 
     def test_openport_app__do_not_restart(self):
-
         port = self.osinteraction.get_open_port()
         s = SimpleTcpServer(port)
-        s.runThreaded()
+        s.run_threaded()
 
         p = subprocess.Popen(
             self.openport_exe
@@ -707,7 +724,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -770,7 +788,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -794,7 +813,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -828,7 +848,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--database",
                 old_db_tmp,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -852,7 +873,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--database",
                 old_db_tmp,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -880,7 +902,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -903,7 +926,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -933,7 +957,8 @@ class AppTests(unittest.TestCase):
                 "--http-forward",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -958,7 +983,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1011,7 +1037,8 @@ class AppTests(unittest.TestCase):
                 "--http-forward",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1044,7 +1071,8 @@ class AppTests(unittest.TestCase):
                 TEST_SERVER,
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1076,7 +1104,8 @@ class AppTests(unittest.TestCase):
                 self.db_file,
                 "--ip-link-protection",
                 "True",
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1151,7 +1180,8 @@ class AppTests(unittest.TestCase):
                 self.db_file,
                 "--ip-link-protection",
                 "True",
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1205,14 +1235,18 @@ class AppTests(unittest.TestCase):
         self.manager_port = manager_port
         print("manager_port :", manager_port)
 
-        command = self.openport_exe + [
-            str(port),
-            "--database",
-            self.db_file,
-            "--verbose",
-            "--server",
-            TEST_SERVER,
-        ]
+        command = (
+            self.openport_exe
+            + [
+                str(port),
+                "--database",
+                self.db_file,
+                "--verbose",
+                "--server",
+                TEST_SERVER,
+            ]
+            + self.ws_options
+        )
         print("######app1")
         p_app = subprocess.Popen(
             command, stderr=subprocess.PIPE, stdout=subprocess.PIPE
@@ -1261,14 +1295,18 @@ class AppTests(unittest.TestCase):
     def test_openport_app__start_trice(self):
         port = self.osinteraction.get_open_port()
         print("local port :", port)
-        command = self.openport_exe + [
-            str(port),
-            "--database",
-            self.db_file,
-            "--verbose",
-            "--server",
-            TEST_SERVER,
-        ]
+        command = (
+            self.openport_exe
+            + [
+                str(port),
+                "--database",
+                self.db_file,
+                "--verbose",
+                "--server",
+                TEST_SERVER,
+            ]
+            + self.ws_options
+        )
         p_app1 = subprocess.Popen(
             command, stderr=subprocess.PIPE, stdout=subprocess.PIPE
         )
@@ -1439,7 +1477,8 @@ class AppTests(unittest.TestCase):
                 "--database",
                 self.db_file,
                 "--restart-on-reboot",
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1465,7 +1504,8 @@ class AppTests(unittest.TestCase):
                 TEST_SERVER,
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1503,7 +1543,8 @@ class AppTests(unittest.TestCase):
                 TEST_SERVER,
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1555,7 +1596,7 @@ class AppTests(unittest.TestCase):
         response = "echo"
         s.set_response(response)
         s.run_threaded()
-
+        sleep(0.2)
         try:
             c = SimpleHTTPClient()
             actual_response = c.get("http://localhost:%s" % local_port)
@@ -1572,17 +1613,17 @@ class AppTests(unittest.TestCase):
                 logger.exception(e)
                 self.fail("Http forward failed")
             self.assertEqual(actual_response, response.strip())
-            print("http portforward ok")
+            logger.info("http portforward ok")
 
             url = "https://%s" % remote_host
-            print("checking url:{}".format(url))
+            logger.info("checking url:{}".format(url))
             try:
                 actual_response = c.get(url)
             except Exception as e:
                 logger.exception(e)
                 self.fail("Https forward failed")
             self.assertEqual(actual_response, response.strip())
-            print("http portforward ok")
+            logger.info("http portforward ok")
         finally:
             s.stop()
 
@@ -1624,7 +1665,8 @@ class AppTests(unittest.TestCase):
                 TEST_SERVER,
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1657,7 +1699,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1759,7 +1802,8 @@ class AppTests(unittest.TestCase):
                 self.db_file,
                 "--ip-link-protection",
                 "False",
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1784,7 +1828,8 @@ class AppTests(unittest.TestCase):
                 self.db_file,
                 "--ip-link-protection",
                 "True",
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1825,7 +1870,8 @@ class AppTests(unittest.TestCase):
                     "--verbose",
                     "--database",
                     old_db_tmp,
-                ],
+                ]
+                + self.ws_options,
                 stderr=subprocess.PIPE,
                 stdout=subprocess.PIPE,
             )
@@ -1923,7 +1969,7 @@ class AppTests(unittest.TestCase):
             f"--database {self.db_file}"
         )
         p = subprocess.Popen(
-            self.openport_exe + cmd.split(),
+            self.openport_exe + cmd.split() + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1944,7 +1990,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1971,7 +2018,8 @@ class AppTests(unittest.TestCase):
                 "--restart-on-reboot",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1990,7 +2038,8 @@ class AppTests(unittest.TestCase):
                 "--verbose",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -2028,7 +2077,8 @@ for i in range(%s):
                     TEST_SERVER,
                     "--database",
                     self.db_file,
-                ],
+                ]
+                + self.ws_options,
                 stderr=subprocess.PIPE,
                 stdout=subprocess.PIPE,
             )
@@ -2064,7 +2114,8 @@ for i in range(%s):
                         "--remote-port",
                         str(remote_port),
                         "--restart-on-reboot",
-                    ],
+                    ]
+                    + self.ws_options,
                     stderr=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                 )
@@ -2083,7 +2134,8 @@ for i in range(%s):
                         TEST_SERVER,
                         "--database",
                         self.db_file,
-                    ],
+                    ]
+                    + self.ws_options,
                     stderr=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                 )
@@ -2124,7 +2176,6 @@ for i in range(%s):
                 stdout=subprocess.PIPE,
             )
         else:
-
             p_restart = subprocess.Popen(
                 [PYTHON_EXE, "-c", sleep_and_print % (1, 3)],
                 stderr=subprocess.PIPE,
@@ -2171,7 +2222,8 @@ for i in range(%s):
                 "--verbose",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -2212,7 +2264,8 @@ for i in range(%s):
                 "1",
                 "--proxy",
                 f"socks5://{proxy}",
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -2226,6 +2279,7 @@ for i in range(%s):
             self, remote_host=remote_host, local_port=port, remote_port=remote_port
         )
         proxy_client.disable()
+        sleep(0.1)
         self.assertFalse(
             check_tcp_port_forward(
                 self,
@@ -2269,7 +2323,8 @@ for i in range(%s):
                 f"socks5://{proxy}",
                 "--exit-on-failure-timeout",
                 "5",
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -2350,7 +2405,8 @@ for i in range(%s):
                     "--verbose",
                     "--database",
                     self.db_file,
-                ],
+                ]
+                + self.ws_options,
                 stderr=subprocess.PIPE,
                 stdout=subprocess.PIPE,
             )
@@ -2407,7 +2463,8 @@ for i in range(%s):
                     "--verbose",
                     "--database",
                     self.db_file,
-                ],
+                ]
+                + self.ws_options,
                 stderr=subprocess.PIPE,
                 stdout=subprocess.PIPE,
             )
@@ -2451,13 +2508,15 @@ for i in range(%s):
                 "--verbose",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
         self.processes_to_kill.append(p)
         remote_host, remote_port, link = get_remote_host_and_port(p, self.osinteraction)
         self.assertEqual(ssh_server, remote_host)
+        p.kill()
 
     def check_live_server(self, tunnel_server):
         local_port = self.osinteraction.get_open_port()
@@ -2471,7 +2530,8 @@ for i in range(%s):
                 "--verbose",
                 "--database",
                 self.db_file,
-            ],
+            ]
+            + self.ws_options,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -2490,6 +2550,14 @@ for i in range(%s):
         self.check_live_server("spr.openport.io")
         sleep(1)
         self.check_live_server("us.openport.io")
+
+
+class AppTestWS(AppTests):
+    ws_options = ["--ws"]
+
+
+class AppTestWSNoSSL(AppTests):
+    ws_options = ["--ws", "--no-ssl"]
 
 
 if __name__ == "__main__":

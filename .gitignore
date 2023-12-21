@@ -24,7 +24,7 @@ _testmain.go
 *.test
 *.prof
 
-openport
+
 openport-*
 openportw-*
 test.db

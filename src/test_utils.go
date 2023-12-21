@@ -22,7 +22,7 @@ func AssertEqual(t *testing.T, a interface{}, b interface{}) {
 	}
 }
 
-func failIfError(t *testing.T, err error) {
+func FailIfError(t *testing.T, err error) {
 	if err != nil {
 		debug.PrintStack()
 		t.Fatal(err)
@@ -49,12 +49,12 @@ var httpClient = http.Client{
 
 func ClickLink(t *testing.T, link string) {
 	resp, err := httpClient.Get(link)
-	failIfError(t, err)
+	FailIfError(t, err)
 
 	defer resp.Body.Close()
 
 	responseBody, err := ioutil.ReadAll(resp.Body)
-	failIfError(t, err)
+	FailIfError(t, err)
 	assert.True(t, strings.Contains(string(responseBody), "Port is now open"))
 }
 
@@ -68,18 +68,18 @@ func CheckTcpForward(t *testing.T, localPort int, server string, remotePort int)
 
 	// Test Local Server
 	resp, err := httpClient.Get(fmt.Sprintf("http://localhost:%d", localPort))
-	failIfError(t, err)
+	FailIfError(t, err)
 	defer resp.Body.Close()
 	responseBody, err := ioutil.ReadAll(resp.Body)
-	failIfError(t, err)
+	FailIfError(t, err)
 	AssertEqual(t, "hello", strings.TrimSpace(string(responseBody)))
 
 	// Test Remote Server
 	resp, err = httpClient.Get(fmt.Sprintf("http://%s:%d", server, remotePort))
-	failIfError(t, err)
+	FailIfError(t, err)
 	defer resp.Body.Close()
 	responseBody, err = ioutil.ReadAll(resp.Body)
-	failIfError(t, err)
+	FailIfError(t, err)
 	AssertEqual(t, "hello", strings.TrimSpace(string(responseBody)))
 
 }
@@ -110,7 +110,7 @@ func WaitForApp(t *testing.T, app *App) {
 
 	select {
 	case res := <-appReady:
-		fmt.Println(res)
+		log.Info(res)
 	case <-time.After(15 * time.Second):
 		app.Stop(1)
 		t.Fatal("App did not connect in time")
@@ -138,7 +138,7 @@ func TimeoutFunction(t *testing.T, f func() string, timeout time.Duration) strin
 
 func GetFreePort(t *testing.T) int {
 	port, err := freeport.GetFreePort()
-	failIfError(t, err)
+	FailIfError(t, err)
 	return port
 }
 

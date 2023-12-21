@@ -7,9 +7,11 @@ import (
 	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
 	"github.com/openportio/openport-go/database"
+	"github.com/openportio/openport-go/utils"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -18,15 +20,46 @@ type WSClient struct {
 	wsConn *net.Conn
 }
 
-func (client *WSClient) Connect(server string) error {
-	wsConn, _, _, err := ws.DefaultDialer.Dial(context.Background(), server+"/ws")
-	client.wsConn = &wsConn
-	if err != nil {
-		return err
+func (client *WSClient) Connect(primaryServer string, fallbackServer string, proxyStr string) error {
+	host := primaryServer
+	if proxyStr != "" {
+		log.Debug("Connecting via proxy: ", proxyStr)
+		u1, err := url.Parse(primaryServer)
+		if err != nil {
+			return err
+		}
+		u2, err := url.Parse(fallbackServer)
+		if err != nil {
+			return err
+		}
+		port := 443
+		if u1.Scheme == "ws" {
+			port = 80
+		}
+		primaryAddr := fmt.Sprintf("%s:%d", u1.Host, port)
+		fallbackAddr := fmt.Sprintf("%s:%d", u2.Host, port)
+		log.Debug("Connecting to primary server: ", primaryAddr)
+		log.Debug("Connecting to fallback server: ", fallbackAddr)
+		conn, usedHost, err := utils.GetProxyConn(proxyStr, primaryAddr, fallbackAddr)
+		if err != nil {
+			return err
+		}
+		client.wsConn = &conn
+		if usedHost == primaryAddr {
+			ws.DefaultDialer.Upgrade(*client.wsConn, u1)
+		} else {
+			ws.DefaultDialer.Upgrade(*client.wsConn, u2)
+		}
 	} else {
-		fmt.Println("Connected to server")
-		return nil
+		wsConn, _, _, err := ws.DefaultDialer.Dial(context.Background(), host)
+		if err != nil {
+			return err
+		}
+		client.wsConn = &wsConn
 	}
+
+	log.Debug("Connected to server")
+	return nil
 }
 
 func (client *WSClient) ForwardPort(localPort int) {
@@ -42,9 +75,9 @@ func (client *WSClient) ForwardPort(localPort int) {
 			return
 		}
 
-		log.Info("Channel Key: ", channel.GetKey())
+		log.Trace("Channel Key: ", channel.GetKey())
 		if chop == ChOpNew {
-			log.Info("Got new channel from server!")
+			log.Trace("Got new channel from server!")
 			conn, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(localPort))
 			if err != nil {
 				if err != io.EOF {
@@ -54,7 +87,7 @@ func (client *WSClient) ForwardPort(localPort int) {
 				continue
 
 			}
-			log.Info("Dialed")
+			log.Trace("Dialed")
 			channel.NetConn = &conn
 			channels[channel.GetKey()] = channel
 
@@ -63,13 +96,13 @@ func (client *WSClient) ForwardPort(localPort int) {
 				for {
 					byts := make([]byte, 4096) // todo buffer
 					len, err := (*channel.NetConn).Read(byts)
-					log.Debugf("Got message from conn: %d", len)
+					log.Tracef("Got message from conn: %d", len)
 
 					if err != nil {
 						if err != io.EOF {
 							log.Error("Error reading from local server:", err)
 						} else {
-							log.Info("Got close from local server")
+							log.Trace("Got close from local server")
 							_ = (*channel.NetConn).Close()
 							_ = channel.Close()
 						}
@@ -80,7 +113,7 @@ func (client *WSClient) ForwardPort(localPort int) {
 						if err != io.EOF {
 							log.Error("Could not send to the websocket: ", err)
 						} else {
-							log.Info("Got close from remote server")
+							log.Trace("Got close from remote server")
 							_ = (*channel.NetConn).Close()
 						}
 						return
@@ -94,7 +127,7 @@ func (client *WSClient) ForwardPort(localPort int) {
 			} else {
 				channel = oldChannel
 				if chop == ChOpCont {
-					log.Info("Got DATA from server!")
+					log.Trace("Got DATA from server!")
 					channel, ok := channels[channel.GetKey()]
 					if !ok {
 						log.Errorf("Trying to get unknown channel: %s", channel.GetKey())
@@ -104,7 +137,7 @@ func (client *WSClient) ForwardPort(localPort int) {
 							if err != io.EOF {
 								log.Error("could not write to local server: ", err)
 							} else {
-								log.Info("Got close from remote server")
+								log.Trace("Got close from remote server")
 								_ = channel.Close()
 								_ = (*channel.NetConn).Close()
 							}
@@ -112,7 +145,7 @@ func (client *WSClient) ForwardPort(localPort int) {
 
 					}
 				} else if chop == ChOpClose {
-					log.Info("Got close from server!")
+					log.Trace("Got close from server!")
 					_ = (*channel.NetConn).Close()
 				} else {
 					log.Errorf("unknown Channel Operation: %#v", chop)

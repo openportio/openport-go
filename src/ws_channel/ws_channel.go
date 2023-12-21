@@ -53,13 +53,13 @@ func (c *Channel) GetKey() string {
 func (c *Channel) GetHeader() []byte {
 	bs := make([]byte, 2)
 	binary.LittleEndian.PutUint16(bs, c.Port)
-	log.Info("ip: ", c.IP)
-	log.Info("bs: ", bs)
+	log.Trace("ip: ", c.IP)
+	log.Trace("bs: ", bs)
 	return append(c.IP[:], bs...)
 }
 
 func (c *Channel) Write(newMsg []byte) error {
-	log.Info("sending a packet to the websocket ", c.GetKey(), newMsg)
+	log.Trace("sending a packet to the websocket ", c.GetKey(), newMsg)
 	if c.channelType == ClientChannelType {
 		return wsutil.WriteClientBinary(*c.WSConn, newMsg)
 	} else {
@@ -77,8 +77,8 @@ func (c *Channel) Send(msg []byte) error {
 }
 
 func (c *Channel) getPayload(chop ChOp, msg []byte) []byte {
-	log.Info("channel key: ", c.GetKey())
-	log.Info("msg header: ", c.GetHeader())
+	log.Trace("channel key: ", c.GetKey())
+	log.Trace("msg header: ", c.GetHeader())
 	return append(append(c.GetHeader(), byte(chop)), msg...) // TODO: not very efficient?
 }
 
