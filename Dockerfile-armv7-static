@@ -1,6 +1,6 @@
 FROM golang:1.19.5-bullseye
 LABEL os=linux
-LABEL arch=armv6
+LABEL arch=armv7
 
 ENV GOOS=linux
 ENV GOARCH=arm
@@ -27,9 +27,9 @@ COPY src/go.mod \
 
 WORKDIR /apps/go/
 
-ENV GOARM=6
+ENV GOARM=7
 
 RUN go mod download
 
 COPY src/ /apps/go/
-RUN go build -ldflags "-s -w" -o /openport-armv6 apps/openport/main.go
+RUN go build -ldflags "-s -w -extldflags=-static" -o /openport-armv7-static apps/openport/main.go
