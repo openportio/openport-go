@@ -1880,6 +1880,7 @@ class AppTests(unittest.TestCase):
             request = http_server.requests[0]
             self.assertEqual([old_token], request[b"restart_session_token"])
             self.assertEqual([old_remote_port], request[b"request_port"])
+            self.assertEqual([b"false"], request[b"automatic_restart"])
         finally:
             http_server.stop()
 
@@ -1917,6 +1918,7 @@ class AppTests(unittest.TestCase):
             request = http_server.requests[0]
             self.assertEqual([old_token], request[b"restart_session_token"])
             self.assertEqual([old_remote_port], request[b"request_port"])
+            self.assertEqual([b"true"], request[b"automatic_restart"])
         finally:
             http_server.stop()
 
@@ -2485,6 +2487,8 @@ for i in range(%s):
                 """
             )
             wait_for_response(lambda: len(http_server.requests) > 3, timeout=60)
+            self.assertEqual([b"true"], http_server.requests[-1][b"automatic_restart"])
+
         finally:
             http_server.stop()
 

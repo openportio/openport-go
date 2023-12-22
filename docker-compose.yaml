@@ -4,9 +4,10 @@ services:
     build:
       context: "."
       dockerfile: Dockerfile-amd64
-    command: "gotestsum --junitfile /apps/go/test-results/report.xml"
+    command: sh -c "/openport-amd64 register ${KEY_REGISTRATION_TOKEN} --server https://test.openport.io && gotestsum --format standard-verbose --junitfile /apps/go/test-results/report.xml apps/openport/*.go"
     user: "${UID}:${GID}"
     volumes:
       - ./test-results:/apps/go/test-results/
+      - ./test-results:/root/.openport/
   # // for debugging only
 #      - ./src/:/apps/go/src/

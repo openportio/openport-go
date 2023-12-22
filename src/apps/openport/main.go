@@ -9,6 +9,7 @@ import (
 	flag "github.com/spf13/pflag"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -32,6 +33,7 @@ func run(app *o.App, args []string) {
 	var socksProxy string
 	var remotePort string
 	var daemonize bool
+	var automaticRestart bool
 	var exitOnFailureTimeout int
 
 	addVerboseFlag := func(set *flag.FlagSet) {
@@ -62,6 +64,9 @@ func run(app *o.App, args []string) {
 		set.StringVar(&socksProxy, "proxy", "", "Socks5 proxy to use. Format: socks5://user:pass@host:port")
 		set.BoolVarP(&daemonize, "daemonize", "d", false, "Start the app in the background.")
 		set.IntVar(&exitOnFailureTimeout, "exit-on-failure-timeout", -1, "Specify in seconds if you want the app to exit if it cannot properly connect.")
+		set.BoolVarP(&automaticRestart, "automatic-restart", "a", false, "This is an automatic restart.")
+		utils.FailOnError(set.MarkHidden("automatic-restart"), "")
+
 		addVerboseFlag(set)
 		addDatabaseFlag(set)
 		addServerFlag(set)
@@ -127,7 +132,7 @@ func run(app *o.App, args []string) {
 
 	flag.Usage = myUsage
 
-	if len(args) == 1 {
+	if len(args) <= 1 {
 		myUsage()
 		app.ExitCode <- o.EXIT_CODE_USAGE
 	}
@@ -145,12 +150,12 @@ func run(app *o.App, args []string) {
 				flagSet.PrintDefaults()
 			}
 		} else {
-			fmt.Printf("Usage: %s (<port> | forward | list | kill | kill-all | register | help )\n", args[0])
+			myUsage()
 			fmt.Printf("Default: %s <port> [arguments]\n", args[0])
 			defaultFlagSet.PrintDefaults()
 		}
 		app.ExitCode <- o.EXIT_CODE_HELP
-	case "register-key":
+	case "register-key", "register":
 		_ = registerKeyFlagSet.Parse(args[2:])
 		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
 		tail := registerKeyFlagSet.Args()
@@ -279,12 +284,17 @@ func run(app *o.App, args []string) {
 			SshServer:           *sshServer,
 			UseWS:               *useWS,
 			NoSSL:               *noSSL,
+			AutomaticRestart:    automaticRestart,
 		}
 		controlPort := app.StartControlServer(controlPort)
 		app.Session.AppManagementPort = controlPort
 
 		if restartOnReboot {
-			app.Session.RestartCommand = strings.Join(args[1:], " ")
+			restartCommand := args[1:]
+			slices.DeleteFunc(restartCommand, func(s string) bool {
+				return s == "--automatic-restart" || s == "-a"
+			})
+			app.Session.RestartCommand = strings.Join(restartCommand, " ")
 		}
 		app.CreateTunnel()
 	}
