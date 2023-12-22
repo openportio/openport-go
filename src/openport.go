@@ -29,6 +29,7 @@ import (
 	"os/user"
 	"path"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -354,6 +355,10 @@ func (app *App) RestartSessions(appPath string, server string) {
 		if app.DbHandler.DbPath != db.DEFAULT_OPENPORT_DB_PATH {
 			restartCommand = append(restartCommand, "--database", app.DbHandler.DbPath)
 		}
+		if !slices.Contains(restartCommand, "--automatic") && !slices.Contains(restartCommand, "-a") {
+			restartCommand = append(restartCommand, "--automatic-restart")
+		}
+
 		log.Infof("Running command %s with args %s", appPath, restartCommand)
 		cmd := exec.Command(appPath, restartCommand...)
 		err = cmd.Start()
