@@ -3,7 +3,7 @@ MAINTAINER JanDeBleser
 
 ENV LANG C.UTF-8
 
-RUN apt-get update && apt-get install -y software-properties-common wget gcc
+RUN apt-get update && apt-get install -y software-properties-common wget gcc curl
 RUN wget https://go.dev/dl/go1.19.3.linux-amd64.tar.gz && \
     rm -rf /usr/local/go &&  \
     tar -C /usr/local -xzf go1.19.3.linux-amd64.tar.gz
@@ -25,4 +25,4 @@ RUN go mod download
 
 COPY src/ /apps/go/
 
-RUN go build -o /openport-amd64 apps/openport/main.go
+RUN go build -ldflags "-s -w" -o /openport-amd64 apps/openport/main.go

@@ -19,7 +19,7 @@ RUN dpkg --add-architecture armhf \
         upx \
         libc6-dev-armhf-cross \
    gcc-arm-linux-gnueabihf \
-        pkg-config \
+        pkg-config curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY src/go.mod \
@@ -29,7 +29,6 @@ COPY src/go.mod \
 WORKDIR /apps/go/
 
 RUN go mod download
-RUN apt-get install -y curl
 
 COPY src/ /apps/go/
-RUN go build -o /openport-armhf apps/openport/main.go
+RUN go build -ldflags "-s -w" -o /openport-armhf apps/openport/main.go
