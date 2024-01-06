@@ -153,7 +153,9 @@ func run(app *o.App, args []string) {
 
 	if len(args) <= 1 {
 		myUsage()
+		defaultFlagSet.PrintDefaults()
 		app.ExitCode <- o.EXIT_CODE_USAGE
+		return
 	}
 
 	switch args[1] {
@@ -344,6 +346,7 @@ func run(app *o.App, args []string) {
 				if !forwardTunnel {
 					log.Error("Missing a local port or command.")
 					myUsage()
+					defaultFlagSet.PrintDefaults()
 					app.ExitCode <- o.EXIT_CODE_INVALID_ARGUMENT
 				}
 			} else {
@@ -352,6 +355,7 @@ func run(app *o.App, args []string) {
 				if err != nil {
 					log.Warnf("Unknown command: %s", tail)
 					myUsage()
+					defaultFlagSet.PrintDefaults()
 					app.ExitCode <- o.EXIT_CODE_INVALID_ARGUMENT
 				}
 			}
@@ -394,5 +398,6 @@ func run(app *o.App, args []string) {
 
 func myUsage() {
 	fmt.Printf("Usage: %s (<port> | forward | list | restart-sessions | kill <port> | kill-all | register <token> | rm <port> | version) [arguments]\n", os.Args[0])
-	fmt.Printf("Type 'openport <command> --help' for more information about the different commands.")
+	fmt.Println("Type 'openport <command> --help' for more information about the different commands.")
+	fmt.Println("Default: openport <port> [arguments]")
 }
