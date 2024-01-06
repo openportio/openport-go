@@ -6,4 +6,4 @@ export HOME
 
 go build -v -o openport apps/openport/main.go
 
-./openport help
+./openport --help
