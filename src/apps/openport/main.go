@@ -7,7 +7,7 @@ import (
 	"github.com/openportio/openport-go/utils"
 	log "github.com/sirupsen/logrus"
 	flag "github.com/spf13/pflag"
-	"net/url"
+	"net"
 	"os"
 	"slices"
 	"strconv"
@@ -35,9 +35,14 @@ func run(app *o.App, args []string) {
 	var daemonize bool
 	var automaticRestart bool
 	var exitOnFailureTimeout int
+	var sshServer string
+	var help = false
 
 	addVerboseFlag := func(set *flag.FlagSet) {
 		set.BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
+	}
+	addHelpFlag := func(set *flag.FlagSet) {
+		set.BoolVarP(&help, "help", "h", false, "Show help message")
 	}
 
 	addDatabaseFlag := func(set *flag.FlagSet) {
@@ -57,7 +62,7 @@ func run(app *o.App, args []string) {
 	addSharedFlags := func(set *flag.FlagSet) {
 		set.IntVar(&port, "port", -1, "The local port you want to expose.")
 		set.IntVar(&port, "local-port", -1, "The local port you want to expose.")
-		set.StringVar(&remotePort, "remote-port", "-1", "The remote port on the server. [openport.io:1234]")
+		set.StringVar(&remotePort, "remote-port", "-1", "The server and port you want to expose locally. [openport.io:1234]")
 		set.IntVar(&controlPort, "listener-port", -1, "")
 		set.BoolVarP(&restartOnReboot, "restart-on-reboot", "R", false, "Restart this session when 'restart-sessions' is called (on boot for example).")
 		set.IntVar(&keepAliveSeconds, "keep-alive", 120, "The interval in between keep-alive messages in seconds.")
@@ -70,6 +75,7 @@ func run(app *o.App, args []string) {
 		addVerboseFlag(set)
 		addDatabaseFlag(set)
 		addServerFlag(set)
+		addHelpFlag(set)
 		utils.FailOnError(set.MarkHidden("listener-port"), "")
 	}
 
@@ -79,7 +85,7 @@ func run(app *o.App, args []string) {
 		"Let users click a secret link before they can "+
 			"access this port. This overwrites the setting in your profile. choices=[True, False]")
 	httpForward := defaultFlagSet.Bool("http-forward", false, "Request an http forward, so you can connect to port 80 on the server.")
-	sshServer := defaultFlagSet.String("request-server", "", "The requested tunnel server")
+	defaultFlagSet.StringVar(&sshServer, "request-server", "", "The requested tunnel server")
 	utils.FailOnError(defaultFlagSet.MarkHidden("request-server"), "")
 	useWS := defaultFlagSet.Bool("ws", false, "Use the websockets protocol instead of ssh.")
 	noSSL := defaultFlagSet.Bool("no-ssl", false, "Connect to the Openport servers without using SSL (only used if the --ws flag is set)")
@@ -97,34 +103,47 @@ func run(app *o.App, args []string) {
 	flagSets["forward"] = forwardTunnelFlagSet
 
 	versionFlagSet := flag.NewFlagSet("version", flag.ExitOnError)
+	addHelpFlag(versionFlagSet)
 	flagSets["version"] = versionFlagSet
 
 	killFlagSet := flag.NewFlagSet("kill", flag.ExitOnError)
 	addVerboseFlag(killFlagSet)
 	addDatabaseFlag(killFlagSet)
+	addHelpFlag(killFlagSet)
 	killFlagSet.IntVar(&port, "port", -1, "The local port of the session to kill.")
 	flagSets["kill"] = killFlagSet
 
 	killAllFlagSet := flag.NewFlagSet("kill-all", flag.ExitOnError)
 	addVerboseFlag(killAllFlagSet)
 	addDatabaseFlag(killAllFlagSet)
+	addHelpFlag(killAllFlagSet)
 	flagSets["kill-all"] = killAllFlagSet
 
 	restartSessionsFlagSet := flag.NewFlagSet("restart-sessions", flag.ExitOnError)
 	addVerboseFlag(restartSessionsFlagSet)
 	addDatabaseFlag(restartSessionsFlagSet)
 	addServerFlag(restartSessionsFlagSet)
+	addHelpFlag(restartSessionsFlagSet)
 	restartSessionsFlagSet.BoolVarP(&daemonize, "daemonize", "d", false, "Start the app in the background.")
 	flagSets["restart-sessions"] = restartSessionsFlagSet
 
 	listFlagSet := flag.NewFlagSet("list", flag.ExitOnError)
 	addVerboseFlag(listFlagSet)
 	addDatabaseFlag(listFlagSet)
+	addHelpFlag(listFlagSet)
 	flagSets["list"] = listFlagSet
+
+	rmFlagSet := flag.NewFlagSet("rm", flag.ExitOnError)
+	addVerboseFlag(rmFlagSet)
+	addDatabaseFlag(rmFlagSet)
+	addHelpFlag(rmFlagSet)
+	rmFlagSet.IntVar(&port, "port", -1, "The port that you want to forget.")
+	flagSets["rm"] = rmFlagSet
 
 	registerKeyFlagSet := flag.NewFlagSet("register-key", flag.ExitOnError)
 	addVerboseFlag(registerKeyFlagSet)
 	addServerFlag(registerKeyFlagSet)
+	addHelpFlag(registerKeyFlagSet)
 	registerKeyFlagSet.StringVar(&socksProxy, "proxy", "", "Socks5 proxy to use. Format: socks5://user:pass@host:port")
 	registerKeyToken := registerKeyFlagSet.String("token", "", "Token to link your machine to your account. Find this token at https://openport.io/user/keys .")
 	registerKeyName := registerKeyFlagSet.String("name", "", "The name for this machine.")
@@ -138,25 +157,16 @@ func run(app *o.App, args []string) {
 	}
 
 	switch args[1] {
-	case "help":
-		if len(args) > 2 {
-			command := args[2]
-			flagSet := flagSets[command]
-			if flagSet == nil {
-				fmt.Printf("No such command: %s\n", command)
-				myUsage()
-			} else {
-				fmt.Printf("Usage: %s %s [arguments]\n", args[0], command)
-				flagSet.PrintDefaults()
-			}
-		} else {
-			myUsage()
-			fmt.Printf("Default: %s <port> [arguments]\n", args[0])
-			defaultFlagSet.PrintDefaults()
-		}
-		app.ExitCode <- o.EXIT_CODE_HELP
+
 	case "register-key", "register":
 		_ = registerKeyFlagSet.Parse(args[2:])
+		if help {
+			println("Use this command to register a key to your account.")
+			println("Usage: openport register-key <token> [arguments]")
+			registerKeyFlagSet.PrintDefaults()
+			app.ExitCode <- o.EXIT_CODE_HELP
+			return
+		}
 		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
 		tail := registerKeyFlagSet.Args()
 		if *registerKeyToken == "" {
@@ -168,9 +178,24 @@ func run(app *o.App, args []string) {
 		}
 		app.RegisterKey(*registerKeyToken, *registerKeyName, socksProxy, server)
 	case "version":
+		_ = versionFlagSet.Parse(args[2:])
+		if help {
+			println("Shows the version of the client executable.")
+			println("Usage: openport version")
+			versionFlagSet.PrintDefaults()
+			app.ExitCode <- o.EXIT_CODE_HELP
+			return
+		}
 		fmt.Println(o.VERSION)
 	case "kill":
 		_ = killFlagSet.Parse(args[2:])
+		if help {
+			println("Use this command to kill a session exposing a port.")
+			println("Usage: openport kill <local_port> [arguments]")
+			killFlagSet.PrintDefaults()
+			app.ExitCode <- o.EXIT_CODE_HELP
+			return
+		}
 		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
 		utils.EnsureHomeFolderExists()
 		tail := killFlagSet.Args()
@@ -191,12 +216,26 @@ func run(app *o.App, args []string) {
 
 	case "kill-all":
 		_ = killAllFlagSet.Parse(args[2:])
+		if help {
+			println("Use this command to kill all sessions.")
+			println("Usage: openport kill-all [arguments]")
+			killAllFlagSet.PrintDefaults()
+			app.ExitCode <- o.EXIT_CODE_HELP
+			return
+		}
 		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
 		utils.EnsureHomeFolderExists()
 		app.DbHandler.InitDB()
 		app.KillAll()
 	case "restart-sessions":
 		_ = restartSessionsFlagSet.Parse(args[2:])
+		if help {
+			println("Use this command to restart all sessions that are started with the --restart-on-reboot flag.")
+			println("Usage: openport restart-sessions [arguments]")
+			restartSessionsFlagSet.PrintDefaults()
+			app.ExitCode <- o.EXIT_CODE_HELP
+			return
+		}
 		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
 		if daemonize {
 			app.StartDaemon(args)
@@ -206,40 +245,91 @@ func run(app *o.App, args []string) {
 		}
 	case "list":
 		_ = listFlagSet.Parse(args[2:])
+		if help {
+			println("Use this command to list all sessions.")
+			println("Usage: openport list [arguments]")
+			listFlagSet.PrintDefaults()
+			app.ExitCode <- o.EXIT_CODE_HELP
+			return
+		}
 		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
 		utils.EnsureHomeFolderExists()
 		app.DbHandler.InitDB()
 		app.ListSessions()
 		app.ExitCode <- o.EXIT_CODE_LIST
+
+	case "rm":
+		_ = rmFlagSet.Parse(args[2:])
+		if help {
+			println("Use this command to remove a port from your local database.")
+			println("Usage: openport rm <local_port> [arguments]")
+			rmFlagSet.PrintDefaults()
+			app.ExitCode <- o.EXIT_CODE_HELP
+			return
+		}
+		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
+		utils.EnsureHomeFolderExists()
+		app.DbHandler.InitDB()
+		tail := rmFlagSet.Args()
+		var err error
+		if port == -1 {
+			if len(tail) == 0 {
+				log.Fatal("port missing")
+			} else {
+				port, err = strconv.Atoi(tail[0])
+				if err != nil {
+					log.Warnf("failing: %s %s", tail, err)
+					killFlagSet.PrintDefaults()
+					app.ExitCode <- o.EXIT_CODE_INVALID_ARGUMENT
+				}
+			}
+		}
+		app.RemoveSession(port)
+		app.ExitCode <- o.EXIT_CODE_RM
 	default:
 		forwardTunnel := args[1] == "forward"
 		var remotePortInt int
-		//var sshServer string = "openport.io"
 		var err error
 		if forwardTunnel {
 			_ = defaultFlagSet.Parse(args[2:])
+			if help {
+				println("Use this command to expose the port of your peer on a local port on your machine.")
+				println("See https://openport.readthedocs.io/en/latest/recipes_create_a_forward_tunnel.html for more information.")
+				println("Usage: openport forward --remote-port <server_port> [arguments]")
+				forwardTunnelFlagSet.PrintDefaults()
+				app.ExitCode <- o.EXIT_CODE_HELP
+				return
+			}
+			if useWS != nil && *useWS {
+				log.Warn("Websockets are not supported for forward tunnels (yet). Let us know if you need this feature.")
+				app.ExitCode <- o.EXIT_CODE_INVALID_ARGUMENT
+				return
+			}
+
 			remotePortInt, err = strconv.Atoi(remotePort)
 			if err != nil {
-				parsed, err := url.Parse(remotePort)
+				parsedServer, parsedPort, err := net.SplitHostPort(remotePort)
 				if err != nil {
-					log.Fatalf("invalid format for remote-port (host:port) : %s %s", remotePort, err)
+					log.Fatalf("invalid format for remote-port (host:port) or (port) : %s %s", remotePort, err)
 				}
-				//sshServer = parsed.Host
-				parsedPort := parsed.Port()
-				if remotePort == "" {
+				if parsedPort == "" {
 					log.Fatalf("Port missing in remote-port arg: %s", remotePort)
 				}
+				sshServer = parsedServer
 				remotePortInt, _ = strconv.Atoi(parsedPort)
-				//} else {
-				//	parsed, err := url.Parse(server)
-				//	if err != nil {
-				//		log.Fatalf("invalid format for server : %s %s", server, err)
-				//	}
-				//sshServer = parsed.Host
 			}
 
 		} else {
 			_ = defaultFlagSet.Parse(args[1:])
+			if help {
+				println("Use this command to expose a local port of your machine to the internet.")
+				println("See https://openport.readthedocs.io/ or https://openport.io for more information.")
+				println("Usage: openport <local_port> [arguments]")
+				defaultFlagSet.PrintDefaults()
+				app.ExitCode <- o.EXIT_CODE_HELP
+				return
+			}
+
 			remotePortInt, err = strconv.Atoi(remotePort)
 			if err != nil {
 				log.Fatalf("Remote port needs to be an integer: %s %s", remotePort, err)
@@ -252,6 +342,7 @@ func run(app *o.App, args []string) {
 		if port == -1 {
 			if len(tail) == 0 {
 				if !forwardTunnel {
+					log.Error("Missing a local port or command.")
 					myUsage()
 					app.ExitCode <- o.EXIT_CODE_INVALID_ARGUMENT
 				}
@@ -259,8 +350,8 @@ func run(app *o.App, args []string) {
 				var err error
 				port, err = strconv.Atoi(tail[0])
 				if err != nil {
-					log.Warnf("failing: %s %s", tail, err)
-					defaultFlagSet.PrintDefaults()
+					log.Warnf("Unknown command: %s", tail)
+					myUsage()
 					app.ExitCode <- o.EXIT_CODE_INVALID_ARGUMENT
 				}
 			}
@@ -281,7 +372,7 @@ func run(app *o.App, args []string) {
 			Active:              true,
 			ForwardTunnel:       forwardTunnel,
 			RemotePort:          remotePortInt,
-			SshServer:           *sshServer,
+			SshServer:           sshServer,
 			UseWS:               *useWS,
 			NoSSL:               *noSSL,
 			AutomaticRestart:    automaticRestart,
@@ -302,5 +393,6 @@ func run(app *o.App, args []string) {
 }
 
 func myUsage() {
-	fmt.Printf("Usage: %s (<port> | forward | list | restart-sessions | kill <port> | kill-all | register-key | help [command] | version) [arguments]\n", os.Args[0])
+	fmt.Printf("Usage: %s (<port> | forward | list | restart-sessions | kill <port> | kill-all | register <token> | rm <port> | version) [arguments]\n", os.Args[0])
+	fmt.Printf("Type 'openport <command> --help' for more information about the different commands.")
 }

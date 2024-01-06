@@ -11,11 +11,11 @@ var DEFAULT_OPENPORT_DB_PATH = path.Join(utils.OPENPORT_HOME, "openport.db")
 
 type Session struct {
 	// gorm.Model
-	ID           int64 `gorm:"AUTO_INCREMENT;PRIMARY_KEY"`
-	Server       string
+	ID           int64  `gorm:"AUTO_INCREMENT;PRIMARY_KEY"`
+	Server       string // The server to send the request to
 	SessionToken string
 
-	SshServer      string
+	SshServer      string // The ssh server to connect to
 	RemotePort     int
 	LocalPort      int
 	Pid            int
@@ -182,4 +182,15 @@ func (dbHandler *DBHandler) EnrichSessionWithHistory(session *Session) Session {
 		return dbSession
 	}
 	return Session{}
+}
+
+func (dbHandler *DBHandler) DeleteSession(session Session) error {
+	db, err := gorm.Open("sqlite3", dbHandler.DbPath)
+	if err != nil {
+		panic("failed to connect database")
+	}
+	defer db.Close()
+
+	db.Delete(&session)
+	return db.Error
 }

@@ -53,6 +53,7 @@ const EXIT_CODE_DAEMONIZED_ERROR = 3
 const EXIT_CODE_FATAL_SESSION_ERROR = 9
 const EXIT_CODE_LIST = 0
 const EXIT_CODE_HELP = 0
+const EXIT_CODE_RM = 0
 
 var OPENPORT_LOG_PATH = path.Join(utils.OPENPORT_HOME, "openport.log")
 
@@ -953,4 +954,20 @@ func (app *App) MarkDisconnected() {
 
 func (app *App) MarkConnected() {
 	app.Connected <- true
+}
+
+func (app *App) RemoveSession(port int) {
+	session, err := app.DbHandler.GetSession(port)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if session.ID == 0 {
+		log.Fatal("Session not found.")
+	}
+	err = app.DbHandler.DeleteSession(session)
+	if err != nil {
+		log.Fatal(err)
+	} else {
+		log.Infof("Session for local port %d deleted.", port)
+	}
 }

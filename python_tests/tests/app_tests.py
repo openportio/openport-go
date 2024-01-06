@@ -53,6 +53,8 @@ TEST_SERVER = "https://test.openport.io"
 # TEST_SERVER = 'https://us.openport.io'
 # TEST_SERVER = 'http://192.168.64.2.xip.io'
 
+TEST_SERVERS = ["test.openport.io", "test2.openport.io"]
+
 KEY_REGISTRATION_TOKEN = os.environ.get("KEY_REGISTRATION_TOKEN")
 
 
@@ -466,6 +468,9 @@ class AppTests(unittest.TestCase):
         p.kill()
 
     def test_openport_app__forward_tunnel(self):
+        if self.ws_options:
+            self.skipTest("not supported with websockets")
+
         port_out = self.osinteraction.get_open_port()
         p_out = subprocess.Popen(
             self.openport_exe
@@ -519,7 +524,69 @@ class AppTests(unittest.TestCase):
         )
         self.assertEqual(2, get_nr_of_shares_in_db_file(self.db_file))
 
+    def test_openport_app__forward_tunnel__host_port(self):
+        if self.ws_options:
+            self.skipTest("not supported with websockets")
+        port_out = self.osinteraction.get_open_port()
+        other_servers = [s for s in TEST_SERVERS if s not in TEST_SERVER]
+
+        p_out = subprocess.Popen(
+            self.openport_exe
+            + [
+                "--local-port",
+                "%s" % port_out,  # --verbose,
+                "--server",
+                TEST_SERVER,
+                "--database",
+                self.db_file,
+                "--request-server",
+                other_servers[0],
+            ]
+            + self.ws_options,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+
+        self.processes_to_kill.append(p_out)
+        remote_host, remote_port, link = get_remote_host_and_port(
+            p_out, self.osinteraction
+        )
+        self.osinteraction.print_output_continuously_threaded(p_out, "p_out")
+        # click_open_for_ip_link(link)
+        # check_tcp_port_forward(self, remote_host=remote_host, local_port=port_out, remote_port=remote_port)
+
+        port_in = self.osinteraction.get_open_port()
+        logger.info("port_in: %s" % port_in)
+        p_in = subprocess.Popen(
+            self.openport_exe
+            + [
+                self.forward,
+                "--local-port",
+                "%s" % port_in,
+                "--server",
+                TEST_SERVER,
+                "--database",
+                self.db_file,
+                "--verbose",
+                "--remote-port",
+                f"{remote_host}:{remote_port}",
+            ]
+            + self.ws_options,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+        self.processes_to_kill.append(p_in)
+        self.check_application_is_still_alive(p_in)
+        self.check_application_is_still_alive(p_out)
+        get_remote_host_and_port(p_in, self.osinteraction, forward_tunnel=True)
+        check_tcp_port_forward(
+            self, remote_host="127.0.0.1", local_port=port_out, remote_port=port_in
+        )
+        self.assertEqual(2, get_nr_of_shares_in_db_file(self.db_file))
+
     def test_openport_app__forward_tunnel__no_local_port_passed(self):
+        if self.ws_options:
+            self.skipTest("not supported with websockets")
         port_out = self.osinteraction.get_open_port()
         p_out = subprocess.Popen(
             self.openport_exe
@@ -571,6 +638,8 @@ class AppTests(unittest.TestCase):
         self.assertEqual(2, get_nr_of_shares_in_db_file(self.db_file))
 
     def test_openport_app__forward_tunnel__restart_on_reboot(self):
+        if self.ws_options:
+            self.skipTest("not supported with websockets")
         serving_port = self.osinteraction.get_open_port()
         p_reverse_tunnel = subprocess.Popen(
             self.openport_exe
@@ -2056,6 +2125,9 @@ class AppTests(unittest.TestCase):
         )
 
     def test_hang(self):
+        if self.ws_options:
+            self.skipTest("not supported with websockets")
+
         sleep_and_print = """from time import sleep
 for i in range(%s):
     print(i)
@@ -2554,6 +2626,91 @@ for i in range(%s):
         self.check_live_server("spr.openport.io")
         sleep(1)
         self.check_live_server("us.openport.io")
+
+    def test_rm_session(self):
+        port = self.osinteraction.get_open_port()
+        command = (
+            self.openport_exe
+            + [
+                "--local-port",
+                str(port),
+                "--server",
+                TEST_SERVER,
+                "--verbose",
+                "--database",
+                self.db_file,
+            ]
+            + self.ws_options
+        )
+        p = subprocess.Popen(
+            command,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+        self.processes_to_kill.append(p)
+        remote_host, remote_port, link = get_remote_host_and_port(p, self.osinteraction)
+        self.check_application_is_still_alive(p)
+
+        p = subprocess.Popen(
+            self.openport_exe
+            + [
+                "rm",
+                str(port),
+                "--verbose",
+                "--database",
+                self.db_file,
+            ],
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+        p.wait(10)
+        output = p.communicate()
+        for i in output:
+            print(i)
+        self.assertIn(
+            f"Session for local port {port} deleted.".encode("utf-8"), output[0]
+        )
+
+        p = subprocess.Popen(
+            command,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+        remote_host_2, remote_port_2, link_2 = get_remote_host_and_port(
+            p, self.osinteraction
+        )
+        self.assertNotEqual(remote_port, remote_port_2)
+        self.assertNotEqual(link, link_2)
+
+    def test_help_messages(self):
+        commands = [
+            "",
+            "forward",
+            "list",
+            "restart-sessions",
+            "kill",
+            "kill-all",
+            "register",
+            "rm",
+            "version",
+        ]
+        for command in commands:
+            logger.info(f"command: {command}")
+            command_list = []
+            if command != "":
+                command_list = [command]
+            p = subprocess.Popen(
+                self.openport_exe + command_list + ["--help"],
+                stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+            )
+
+            process_output = p.communicate()
+            print(process_output[1].decode("utf-8"))
+
+            self.assertEqual(0, p.returncode)
+            self.assertEqual(b"", process_output[0])
+            self.assertIn(b"Usage: ", process_output[1])
 
 
 class AppTestWS(AppTests):
