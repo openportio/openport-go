@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"github.com/jinzhu/gorm"
 	"path"
 )
@@ -57,6 +58,7 @@ type DBHandler struct {
 
 func (dbHandler *DBHandler) InitDB() {
 	log.Debugf("db path: %s", dbHandler.DbPath)
+	existed := utils.FileExists(dbHandler.DbPath)
 	db, err := gorm.Open("sqlite3", dbHandler.DbPath)
 	if err != nil {
 		log.Panicf("failed to connect database: %s", err)
@@ -65,7 +67,9 @@ func (dbHandler *DBHandler) InitDB() {
 
 	// Migrate the schema
 	db.AutoMigrate(&Session{})
-	log.Debugf("db created")
+	if !existed {
+		log.Debugf("db created")
+	}
 }
 
 func (dbHandler *DBHandler) GetForwardSession(remotePort int, sshServer string) (Session, error) {
@@ -147,6 +151,11 @@ func (dbHandler *DBHandler) GetSessionsToRestart() ([]Session, error) {
 
 	var sessions []Session
 	db.Where("ifnull(restart_command, '') != '' ").Find(&sessions)
+	err = db.Error
+	if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
+		sessions = []Session{}
+		return sessions, nil
+	}
 	return sessions, db.Error
 }
 
