@@ -19,7 +19,6 @@ import (
 	"github.com/sirupsen/logrus/hooks/writer"
 	"golang.org/x/crypto/ssh"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -326,10 +325,12 @@ func (app *App) restartSessionsForAllUsers(appPath string) {
 	}
 
 	currentUser, err := user.Current()
+	username := ""
 	if err != nil {
 		log.Debug("error getting current user:", err)
+	} else {
+		username = currentUser.Username
 	}
-	username := currentUser.Username
 	if username != "root" {
 		return
 	}
@@ -491,15 +492,17 @@ func CheckUsernameInConfigFile() {
 	}
 
 	currentUser, err := user.Current()
+	username := ""
 	if err != nil {
 		log.Debug(err)
+	} else {
+		username = currentUser.Username
 	}
-	username := currentUser.Username
 	if username == "root" {
 		return
 	}
 
-	buf, err := ioutil.ReadFile(USER_CONFIG_FILE)
+	buf, err := os.ReadFile(USER_CONFIG_FILE)
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Warnf("The file %s does not exist. Your sessions will not be automatically restarted "+
@@ -657,7 +660,7 @@ func (app *App) RequestPortForward(session *db.Session, publicKey []byte) (PortR
 		return PortResponse{}, err
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Debugf("http error")
 		log.Warn(err)

@@ -21,3 +21,6 @@ run-proxy-test-go:
 
 run-proxy-test-go-no-password:
 	docker compose -f ./docker-compose/proxy-test-no-password.yaml run openport-go
+
+start_dev_servers:
+	docker compose -f ./docker-compose/docker-compose-test.yaml up proxy-no-password toxiproxy
