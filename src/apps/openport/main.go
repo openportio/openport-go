@@ -160,7 +160,7 @@ func run(app *o.App, args []string) {
 
 	switch args[1] {
 
-	case "register-key", "register":
+	case "register-key", "register", "link":
 		_ = registerKeyFlagSet.Parse(args[2:])
 		if help {
 			println("Use this command to register a key to your account.")
@@ -293,7 +293,7 @@ func run(app *o.App, args []string) {
 			if help {
 				println("Use this command to expose the port of your peer on a local port on your machine.")
 				println("See https://openport.readthedocs.io/en/latest/recipes_create_a_forward_tunnel.html for more information.")
-				println("Usage: openport forward --remote-port <server_port> [arguments]")
+				println("Usage: openport forward --remote-port <server:server_port> [arguments]")
 				forwardTunnelFlagSet.PrintDefaults()
 				app.ExitCode <- o.EXIT_CODE_HELP
 				return
@@ -322,7 +322,19 @@ func run(app *o.App, args []string) {
 			if help {
 				println("Use this command to expose a local port of your machine to the internet.")
 				println("See https://openport.readthedocs.io/ or https://openport.io for more information.")
-				println("Usage: openport <local_port> [arguments]")
+				println("Usage: openport <command> [arguments]")
+				println("Commands:")
+				println("  <port>                Expose a local port to the internet.")
+				println("  forward               Expose a port of your peer to this machine.")
+				println("  list                  List all sessions.")
+				println("  kill <local_port>     Kill a session.")
+				println("  kill-all              Kill all sessions.")
+				println("  restart-sessions      Restart all sessions that are started with the --restart-on-reboot flag.")
+				println("  rm <local_port>       Remove a port from your local database.")
+				println("  register <token>      Link your device to your account.")
+				println("  version               Show the version of the client executable.")
+				println("")
+				println("Default usage: openport <local_port> [arguments]")
 				defaultFlagSet.PrintDefaults()
 				app.ExitCode <- o.EXIT_CODE_HELP
 				return
