@@ -62,7 +62,7 @@ WORKDIR /apps/go/
 RUN go mod download
 
 COPY src/ /apps/go/
-RUN go build -o /openport-windows-amd64 -ldflags "-s -w" apps/openport/main.go
-RUN go build -o /openportw-windows-amd64 -ldflags "-H=windowsgui -s -w" apps/openport/main.go
+RUN go build -o /openport-windows-amd64.exe -ldflags "-s -w -extldflags=-static" apps/openport/main.go
+RUN go build -o /openportw-windows-amd64.exe -ldflags "-H=windowsgui -s -w -extldflags=-static" apps/openport/main.go
 RUN #go build -o openport-service-windows-amd64 -ldflags -H=windowsgui apps/windows_service/main.go
-RUN go build -o /openport-service-windows-amd64 -ldflags "-s -w" apps/windows_service/main.go
+RUN go build -o /openport-service-windows-amd64.exe -ldflags "-s -w -extldflags=-static" apps/windows_service/main.go

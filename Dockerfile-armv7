@@ -1,24 +1,23 @@
 FROM golang:1.21.5-bullseye
 LABEL os=linux
-LABEL arch=armhf
+LABEL arch=armv7
 
 ENV GOOS=linux
 ENV GOARCH=arm
-ENV GOARM=7
 ENV CGO_ENABLED=1
-ENV CC=arm-linux-gnueabihf-gcc
+ENV CC=arm-linux-gnueabi-gcc
 ENV PATH="/go/bin/${GOOS}_${GOARCH}:${PATH}"
-ENV PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
+ENV PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabi/pkgconfig
 
 # install build & runtime dependencies
-RUN dpkg --add-architecture armhf \
+RUN dpkg --add-architecture arm \
     && apt-get update \
     && dpkg --configure -a \
     && apt-get install -y --no-install-recommends \
         protobuf-compiler \
         upx \
-        libc6-dev-armhf-cross \
-   gcc-arm-linux-gnueabihf \
+        gcc-arm-linux-gnueabi \
+        libc6-dev-armel-cross \
         pkg-config curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -28,7 +27,9 @@ COPY src/go.mod \
 
 WORKDIR /apps/go/
 
+ENV GOARM=7
+
 RUN go mod download
 
 COPY src/ /apps/go/
-RUN go build -ldflags "-s -w -extldflags=-static" -o /openport-armhf-static apps/openport/main.go
+RUN go build -ldflags "-s -w -extldflags=-static" -o /openport-armv7 apps/openport/main.go

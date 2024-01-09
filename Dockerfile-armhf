@@ -31,4 +31,4 @@ WORKDIR /apps/go/
 RUN go mod download
 
 COPY src/ /apps/go/
-RUN go build -ldflags "-s -w" -o /openport-armhf apps/openport/main.go
+RUN go build -ldflags "-s -w -extldflags=-static" -o /openport-armhf apps/openport/main.go
