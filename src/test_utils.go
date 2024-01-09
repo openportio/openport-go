@@ -6,7 +6,7 @@ import (
 	"github.com/phayes/freeport"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"runtime/debug"
@@ -53,7 +53,7 @@ func ClickLink(t *testing.T, link string) {
 
 	defer resp.Body.Close()
 
-	responseBody, err := ioutil.ReadAll(resp.Body)
+	responseBody, err := io.ReadAll(resp.Body)
 	FailIfError(t, err)
 	assert.True(t, strings.Contains(string(responseBody), "Port is now open"))
 }
@@ -70,7 +70,7 @@ func CheckTcpForward(t *testing.T, localPort int, server string, remotePort int)
 	resp, err := httpClient.Get(fmt.Sprintf("http://localhost:%d", localPort))
 	FailIfError(t, err)
 	defer resp.Body.Close()
-	responseBody, err := ioutil.ReadAll(resp.Body)
+	responseBody, err := io.ReadAll(resp.Body)
 	FailIfError(t, err)
 	AssertEqual(t, "hello", strings.TrimSpace(string(responseBody)))
 
@@ -78,7 +78,7 @@ func CheckTcpForward(t *testing.T, localPort int, server string, remotePort int)
 	resp, err = httpClient.Get(fmt.Sprintf("http://%s:%d", server, remotePort))
 	FailIfError(t, err)
 	defer resp.Body.Close()
-	responseBody, err = ioutil.ReadAll(resp.Body)
+	responseBody, err = io.ReadAll(resp.Body)
 	FailIfError(t, err)
 	AssertEqual(t, "hello", strings.TrimSpace(string(responseBody)))
 
