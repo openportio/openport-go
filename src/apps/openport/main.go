@@ -260,7 +260,7 @@ func run(app *o.App, args []string) {
 	case "rm":
 		_ = rmFlagSet.Parse(args[2:])
 		if help {
-			println("Use this command to remove a port from your local database.")
+			println("Use this command to remove a port from your local database. This resets the remote port.")
 			println("Usage: openport rm <local_port> [arguments]")
 			rmFlagSet.PrintDefaults()
 			app.ExitCode <- o.EXIT_CODE_HELP
@@ -333,6 +333,7 @@ func run(app *o.App, args []string) {
 				println("  rm <local_port>       Remove a port from your local database.")
 				println("  register <token>      Link your device to your account.")
 				println("  version               Show the version of the client executable.")
+				println("Run 'openport <command> --help' for more information about the command.")
 				println("")
 				println("Default usage: openport <local_port> [arguments]")
 				defaultFlagSet.PrintDefaults()
