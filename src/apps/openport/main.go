@@ -216,7 +216,7 @@ func run(app *o.App, args []string) {
 		}
 		app.KillSession(port)
 
-	case "kill-all":
+	case "kill-all", "killall":
 		_ = killAllFlagSet.Parse(args[2:])
 		if help {
 			println("Use this command to kill all sessions.")
@@ -226,10 +226,9 @@ func run(app *o.App, args []string) {
 			return
 		}
 		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
-		utils.EnsureHomeFolderExists()
-		app.DbHandler.InitDB()
+		app.InitFiles()
 		app.KillAll()
-	case "restart-sessions":
+	case "restart-sessions", "restart", "restartsessions":
 		_ = restartSessionsFlagSet.Parse(args[2:])
 		if help {
 			println("Use this command to restart all sessions that are started with the --restart-on-reboot flag.")
@@ -242,7 +241,6 @@ func run(app *o.App, args []string) {
 		if daemonize {
 			app.StartDaemon(args)
 		} else {
-			utils.EnsureHomeFolderExists()
 			app.RestartSessions(args[0], server)
 		}
 	case "list":
@@ -255,8 +253,7 @@ func run(app *o.App, args []string) {
 			return
 		}
 		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
-		utils.EnsureHomeFolderExists()
-		app.DbHandler.InitDB()
+		app.InitFiles()
 		app.ListSessions()
 		app.ExitCode <- o.EXIT_CODE_LIST
 
@@ -270,8 +267,7 @@ func run(app *o.App, args []string) {
 			return
 		}
 		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
-		utils.EnsureHomeFolderExists()
-		app.DbHandler.InitDB()
+		app.InitFiles()
 		tail := rmFlagSet.Args()
 		var err error
 		if port == -1 {
@@ -391,6 +387,7 @@ func run(app *o.App, args []string) {
 			})
 			app.Session.RestartCommand = strings.Join(restartCommand, " ")
 		}
+		app.InitFiles()
 		app.CreateTunnel()
 	}
 	app.ExitCode <- 0

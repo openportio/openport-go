@@ -183,6 +183,11 @@ func InitLogging(verbose bool, logFilePath string) {
 	loggingReady = true
 }
 
+func (app *App) InitFiles() {
+	utils.EnsureHomeFolderExists()
+	app.DbHandler.InitDB()
+}
+
 func (app *App) StartDaemon(args []string) {
 	// TODO: there might be an issue with this?
 	loc := Find(args, "-d")
@@ -311,9 +316,58 @@ func (app *App) ListSessions() {
 
 func (app *App) RestartSessions(appPath string, server string) {
 	log.Debugf("Restarting Sessions -> %s %s %s", appPath, server, app.DbHandler.DbPath)
+	app.restartSessionsForCurrentUser(appPath, server)
+	app.restartSessionsForAllUsers(appPath)
+}
+
+func (app *App) restartSessionsForAllUsers(appPath string) {
+	if strings.Contains(runtime.GOOS, "windows") {
+		return
+	}
+
+	currentUser, err := user.Current()
+	if err != nil {
+		log.Debug("error getting current user:", err)
+	}
+	username := currentUser.Username
+	if username != "root" {
+		return
+	}
+
+	buf, err := os.ReadFile(USER_CONFIG_FILE)
+	if err != nil {
+		log.Warnf("Could not read file %s: %s", USER_CONFIG_FILE, err)
+	} else {
+		users := strings.Split(string(buf), "\n")
+
+		for _, username := range users {
+			username = strings.TrimSpace(strings.Split(username, "#")[0])
+			if username == "root" {
+				continue
+			}
+			if username != "" {
+				command := []string{"-u", username, "-H", appPath, "restart-sessions"}
+				log.Debugf("Running command sudo %s", command)
+				cmd := exec.Command("sudo", command...)
+				err = cmd.Start()
+				if err != nil {
+					log.Warn(err)
+				}
+			}
+		}
+	}
+}
+
+func (app *App) restartSessionsForCurrentUser(appPath string, server string) {
+	if !utils.FileExists(app.DbHandler.DbPath) {
+		log.Debugf("DB file %s does not exist. Not restarting anything.", app.DbHandler.DbPath)
+		return
+	}
+
 	sessions, err := app.DbHandler.GetSessionsToRestart()
 	if err != nil {
-		panic(err)
+		log.Error("Error getting sessions to restart: ", err)
+		return
 	}
 	for _, session := range sessions {
 		log.Debug("Restarting session: ", session.LocalPort)
@@ -365,42 +419,6 @@ func (app *App) RestartSessions(appPath string, server string) {
 		err = cmd.Start()
 		if err != nil {
 			log.Warn(err)
-		}
-	}
-
-	if strings.Contains(runtime.GOOS, "windows") {
-		return
-	}
-
-	currentUser, err := user.Current()
-	if err != nil {
-		log.Debug(err)
-	}
-	username := currentUser.Username
-	if username != "root" {
-		return
-	}
-
-	buf, err := os.ReadFile(USER_CONFIG_FILE)
-	if err != nil {
-		log.Warnf("Could not read file %s: %s", USER_CONFIG_FILE, err)
-	} else {
-		users := strings.Split(string(buf), "\n")
-
-		for _, username := range users {
-			username = strings.TrimSpace(strings.Split(username, "#")[0])
-			if username == "root" {
-				continue
-			}
-			if username != "" {
-				command := []string{"-u", username, "-H", appPath, "restart-sessions"}
-				log.Debugf("Running command sudo %s", command)
-				cmd := exec.Command("sudo", command...)
-				err = cmd.Start()
-				if err != nil {
-					log.Warn(err)
-				}
-			}
 		}
 	}
 }

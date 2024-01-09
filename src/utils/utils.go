@@ -1,11 +1,13 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/proxy"
 	"net"
 	"net/url"
+	"os"
 )
 
 func FailOnError(err error, msg string) {
@@ -52,4 +54,12 @@ func GetProxyConn(proxyStr string, primaryAddr string, fallbackAddr string) (net
 		}
 	}
 	return conn, connectedToHost, err
+}
+
+func FileExists(path string) bool {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return false
+	} else {
+		return true
+	}
 }
