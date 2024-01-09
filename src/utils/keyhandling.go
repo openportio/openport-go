@@ -5,9 +5,9 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
-	"io/ioutil"
 	"os"
 	"os/user"
 	"path"
@@ -54,7 +54,11 @@ func CreateKeys() ([]byte, ssh.Signer, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	err = ioutil.WriteFile(OPENPORT_PUBLIC_KEY_PATH, ssh.MarshalAuthorizedKey(pub), 0655)
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
+	err = os.WriteFile(OPENPORT_PUBLIC_KEY_PATH, []byte(fmt.Sprintf("%s %s", ssh.MarshalAuthorizedKey(pub), hostname)), 0655)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -62,12 +66,12 @@ func CreateKeys() ([]byte, ssh.Signer, error) {
 }
 
 func ReadKeys() ([]byte, ssh.Signer, error) {
-	publicKey, err := ioutil.ReadFile(OPENPORT_PUBLIC_KEY_PATH)
+	publicKey, err := os.ReadFile(OPENPORT_PUBLIC_KEY_PATH)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	buf, err := ioutil.ReadFile(OPENPORT_PRIVATE_KEY_PATH)
+	buf, err := os.ReadFile(OPENPORT_PRIVATE_KEY_PATH)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -101,7 +105,7 @@ func EnsureKeysExist() ([]byte, ssh.Signer, error) {
 		_, err2 := os.Stat(SSH_PUBLIC_KEY_PATH)
 		if err1 == nil && err2 == nil {
 			// ssh-key exists
-			buf, err := ioutil.ReadFile(SSH_PRIVATE_KEY_PATH)
+			buf, err := os.ReadFile(SSH_PRIVATE_KEY_PATH)
 			if err != nil {
 				log.Warn(err)
 				return CreateKeys()
@@ -117,14 +121,14 @@ func EnsureKeysExist() ([]byte, ssh.Signer, error) {
 					return CreateKeys()
 				} else {
 					log.Debugf("Usable keys in %s, copying to %s", SSH_PUBLIC_KEY_PATH, OPENPORT_PUBLIC_KEY_PATH)
-					err = ioutil.WriteFile(OPENPORT_PRIVATE_KEY_PATH, buf, 0600)
+					err = os.WriteFile(OPENPORT_PRIVATE_KEY_PATH, buf, 0600)
 					if err != nil {
 						log.Warn(err)
 						return CreateKeys()
 					}
 
-					pubBuf, err := ioutil.ReadFile(SSH_PUBLIC_KEY_PATH)
-					err = ioutil.WriteFile(OPENPORT_PUBLIC_KEY_PATH, pubBuf, 0600)
+					pubBuf, err := os.ReadFile(SSH_PUBLIC_KEY_PATH)
+					err = os.WriteFile(OPENPORT_PUBLIC_KEY_PATH, pubBuf, 0600)
 					if err != nil {
 						log.Warn(err)
 						return CreateKeys()
