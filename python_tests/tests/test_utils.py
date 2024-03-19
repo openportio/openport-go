@@ -1,27 +1,28 @@
+import datetime
 import inspect
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
+import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+from time import sleep
 from urllib.error import HTTPError
 from urllib.parse import parse_qs
 from urllib.request import Request, urlopen
 
-import datetime
 import requests
-import socket
-import threading
-from time import sleep
+from prettytable import PrettyTable
 
 # from openport.apps.openport_service import Openport
 # from openport.apps.openportit import OpenportItApp
 from tests.utils import osinteraction, dbhandler
 from tests.utils.logger_service import get_logger
 from tests.utils.utils import run_method_with_timeout, TimeoutException
-from prettytable import PrettyTable
+
 
 logger = get_logger(__name__)
 
@@ -100,7 +101,7 @@ class SimpleHTTPClient:
 
 class SimpleTcpServer:
     def __init__(self, port):
-        self.HOST = "127.0.0.1"  # Symbolic name meaning the local host
+        self.HOST = "0.0.0.0"  # Symbolic name meaning all interfaces
         self.PORT = port
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -263,62 +264,109 @@ def run_command_with_timeout_return_process(args, timeout_s):
     return c.run(timeout_s)
 
 
+def get_remote_host_and_port_from_output(
+    text, http_forward=False, forward_tunnel=False
+):
+    if http_forward:
+        m = re.search(
+            r"Now forwarding remote address (?P<host>[a-z0-9\.\-]*) to localhost",
+            text,
+        )
+    elif forward_tunnel:
+        m = re.search(
+            r"""[^"]You are now connected. You can access the remote pc\'s port (?P<remote_port>\d*) """
+            r"on localhost:(?P<local_port>\d*)",
+            text,
+        )
+    else:
+        m = re.search(
+            r"Now forwarding remote port (?P<host>[^:]*):(?P<remote_port>\d*) to localhost",
+            text,
+        )
+
+    if m is None:
+        return False
+
+    else:
+        if http_forward:
+            host = m.group("host")
+            port = 80
+        elif forward_tunnel:
+            host = "localhost"
+            port = int(m.group("local_port"))
+        else:
+            host, port = m.group("host"), int(m.group("remote_port"))
+        m = re.search(r"to first go here: ([a-zA-Z0-9\:/\.\-]+) .", text)
+        link = m.group(1) if m is not None else None
+        return host, port, link
+
+
 def get_remote_host_and_port(
     p,
     osinteraction,
-    timeout=10,
+    timeout=20,
     output_prefix="",
     http_forward=False,
     forward_tunnel=False,
 ):
+    get_log_method = lambda: "".join(i for i in osinteraction.get_output(p) if i)
+    return get_remote_host_and_port__generic(
+        get_log_method, timeout, output_prefix, http_forward, forward_tunnel
+    )
+
+
+def get_remote_host_and_port__docker(
+    container,
+    timeout=20,
+    output_prefix="",
+    http_forward=False,
+    forward_tunnel=False,
+):
+    log_stream = container.logs(stream=True)
+    new_logs = ""
+
+    def read_logs():
+        nonlocal new_logs
+        for line in log_stream:
+            new_logs += line.decode("utf-8")
+
+    t = threading.Thread(target=read_logs)
+    t.start()
+
+    def get_log_method():
+        nonlocal new_logs
+        result = new_logs
+        new_logs = ""
+        return result
+
+    return get_remote_host_and_port__generic(
+        get_log_method, timeout, output_prefix, http_forward, forward_tunnel
+    )
+
+
+def get_remote_host_and_port__generic(
+    get_log_method,
+    timeout=20,
+    output_prefix="",
+    http_forward=False,
+    forward_tunnel=False,
+):
+    logger.debug("waiting for response")
     start = datetime.datetime.now()
     all_output = ["", ""]
     while start + datetime.timedelta(seconds=timeout) > datetime.datetime.now():
-        output = osinteraction.get_output(p)
-        for j in range(2):
-            if output[j]:
-                all_output[j] += output[j] + "\n"
-        if output[0]:
-            logger.info("%s - stdout -  <<<<<%s>>>>>" % (output_prefix, output[0]))
-        if output[1]:
-            logger.error("%s - stderr - <<<<<%s>>>>>" % (output_prefix, output[1]))
-        if not output[0]:
+        output = get_log_method()
+        all_output += output
+        if output:
+            logger.info("%s - <<<<<%s>>>>>" % (output_prefix, output))
+        else:
             sleep(0.1)
             continue
-
-        if http_forward:
-            m = re.search(
-                r"Now forwarding remote address (?P<host>[a-z0-9\.\-]*) to localhost",
-                output[0],
-            )
-        elif forward_tunnel:
-            m = re.search(
-                r"You are now connected. You can access the remote pc\'s port (?P<remote_port>\d*) "
-                r"on localhost:(?P<local_port>\d*)",
-                output[0],
-            )
-        else:
-            m = re.search(
-                r"Now forwarding remote port (?P<host>[^:]*):(?P<remote_port>\d*) to localhost",
-                output[0],
-            )
-        if m is None:
-            if p.poll() is not None:
-                raise Exception("Application is stopped")
-            sleep(0.1)
-            continue
-        else:
-            if http_forward:
-                host = m.group("host")
-                port = 80
-            elif forward_tunnel:
-                host = "localhost"
-                port = int(m.group("local_port"))
-            else:
-                host, port = m.group("host"), int(m.group("remote_port"))
-            m = re.search(r"to first go here: ([a-zA-Z0-9\:/\.\-]+) .", output[0])
-            link = m.group(1) if m is not None else None
-            return host, port, link
+        result = get_remote_host_and_port_from_output(
+            output, http_forward, forward_tunnel
+        )
+        if result:
+            return result
 
     raise Exception("remote host and port not found in output: {}".format(all_output))
 
@@ -400,6 +448,16 @@ def click_open_for_ip_link(link):
 
 
 servers = {}
+
+
+def check_application_is_still_alive(test, p):
+    if not application_is_alive(p):  # process terminated
+        print("application terminated: ", test.osinteraction.get_output(p))
+        test.fail("p_app.poll() should be None but was %s" % p.poll())
+
+
+def application_is_alive(p):
+    return run_method_with_timeout(p.poll, 1, raise_exception=False) is None
 
 
 def check_tcp_port_forward(

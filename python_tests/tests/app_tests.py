@@ -27,6 +27,7 @@ from tests.test_utils import (
     get_ip,
     TEST_FILES_PATH,
     print_shares_in_db,
+    application_is_alive,
 )
 from tests.test_utils import get_nr_of_shares_in_db_file
 from tests.test_utils import (
@@ -166,7 +167,9 @@ class AppTests(unittest.TestCase):
             stdout=subprocess.PIPE,
         )
         self.processes_to_kill.append(p)
-        remote_host, remote_port, link = get_remote_host_and_port(p, self.osinteraction)
+        remote_host, remote_port, link = get_remote_host_and_port(
+            p, self.osinteraction, timeout=30
+        )
         self.check_application_is_still_alive(p)
         click_open_for_ip_link(link)
         #        self.assertEqual(1, get_nr_of_shares_in_db_file(self.db_file))
@@ -476,7 +479,8 @@ class AppTests(unittest.TestCase):
             self.openport_exe
             + [
                 "--local-port",
-                "%s" % port_out,  # --verbose,
+                "%s" % port_out,
+                "--verbose",
                 "--server",
                 TEST_SERVER,
                 "--database",
@@ -519,6 +523,7 @@ class AppTests(unittest.TestCase):
         self.check_application_is_still_alive(p_in)
         self.check_application_is_still_alive(p_out)
         get_remote_host_and_port(p_in, self.osinteraction, forward_tunnel=True)
+        #     sleep(20)
         check_tcp_port_forward(
             self, remote_host="127.0.0.1", local_port=port_out, remote_port=port_in
         )
@@ -830,13 +835,13 @@ class AppTests(unittest.TestCase):
         )
         self.processes_to_kill.append(p_manager2)
         run_method_with_timeout(
-            self.application_is_alive,
+            application_is_alive,
             args=[p_manager2],
             timeout_s=10,
             raise_exception=False,
         )
         print_all_output(p_manager2, self.osinteraction, "p_manager2")
-        self.assertFalse(self.application_is_alive(p_manager2))
+        self.assertFalse(application_is_alive(p_manager2))
         try:
             response = c.send(request)
         except:
@@ -1119,11 +1124,8 @@ class AppTests(unittest.TestCase):
 
         self.check_http_port_forward(remote_host=remote_host, local_port=port)
 
-    def application_is_alive(self, p):
-        return run_method_with_timeout(p.poll, 1, raise_exception=False) is None
-
     def check_application_is_still_alive(self, p):
-        if not self.application_is_alive(p):  # process terminated
+        if not application_is_alive(p):  # process terminated
             print("application terminated: ", self.osinteraction.get_output(p))
             self.fail("p_app.poll() should be None but was %s" % p.poll())
 
@@ -1211,7 +1213,7 @@ class AppTests(unittest.TestCase):
         self.processes_to_kill.append(p_manager2)
         run_method_with_timeout(p_manager2.wait, 10)
 
-        # self.assertFalse(self.application_is_alive(p_manager2))
+        # self.assertFalse(application_is_alive(p_manager2))
 
         sleep(1)
         # todo: replace by /register
@@ -1344,7 +1346,7 @@ class AppTests(unittest.TestCase):
         wait_for_response(foo)
 
         run_method_with_timeout(p_app2.wait, 5)
-        self.assertFalse(self.application_is_alive(p_app2))
+        self.assertFalse(application_is_alive(p_app2))
 
         p_app.kill()
         run_method_with_timeout(p_app.wait, 5)
@@ -1403,7 +1405,7 @@ class AppTests(unittest.TestCase):
 
         wait_for_response(foo, args=[p_app2])
         run_method_with_timeout(p_app2.wait, 5)
-        self.assertFalse(self.application_is_alive(p_app2))
+        self.assertFalse(application_is_alive(p_app2))
 
         print("######app3")
         p_app3 = subprocess.Popen(
@@ -1412,7 +1414,7 @@ class AppTests(unittest.TestCase):
         self.processes_to_kill.append(p_app3)
         wait_for_response(foo, args=[p_app3])
         run_method_with_timeout(p_app3.wait, 5)
-        self.assertFalse(self.application_is_alive(p_app3))
+        self.assertFalse(application_is_alive(p_app3))
 
     def write_to_conf_file(self, section, option, value):
         import ConfigParser
@@ -1442,7 +1444,7 @@ class AppTests(unittest.TestCase):
     #
     #      self.assertNotEqual(False, command_output[0])
     #      self.assertTrue('Manager is now running on port' in command_output[0])
-    #      self.assertTrue(self.application_is_alive(p_manager2))
+    #      self.assertTrue(application_is_alive(p_manager2))
     #
     #      s.close()
     #
@@ -1463,7 +1465,7 @@ class AppTests(unittest.TestCase):
     #
     #      self.assertNotEqual(False, command_output[0])
     #      self.assertTrue('Manager is now running on port' in command_output[0])
-    #      self.assertTrue(self.application_is_alive(p_manager2))
+    #      self.assertTrue(application_is_alive(p_manager2))
     #
     #      s.close()
     #
@@ -1486,7 +1488,7 @@ class AppTests(unittest.TestCase):
     #
     #      self.assertNotEqual(False, command_output[0])
     #      self.assertTrue('Manager is now running on port' in command_output[0])
-    #      self.assertTrue(self.application_is_alive(p_manager2))
+    #      self.assertTrue(application_is_alive(p_manager2))
     #
     #      s.stop()
 
@@ -1596,7 +1598,7 @@ class AppTests(unittest.TestCase):
         self.osinteraction.print_output_continuously_threaded(p_kill, "p_kill")
         run_method_with_timeout(p_kill.wait, 10)
         run_method_with_timeout(p_app.wait, 10)
-        self.assertFalse(self.application_is_alive(p_app))
+        self.assertFalse(application_is_alive(p_app))
 
     def test_kill_all(self):
         port = self.osinteraction.get_open_port()
@@ -1805,7 +1807,7 @@ class AppTests(unittest.TestCase):
         for out in process_output:
             print("output: ", out)
 
-        self.assertFalse(self.application_is_alive(p))
+        self.assertFalse(application_is_alive(p))
         self.assertEqual(self.app_version, process_output[0].decode("utf-8").strip())
 
     def test_run_run_command_with_timeout(self):
@@ -2047,7 +2049,7 @@ class AppTests(unittest.TestCase):
         self.osinteraction.print_output_continuously_threaded(p)
         self.processes_to_kill.append(p)
         sleep(1)
-        self.assertTrue(self.application_is_alive(p))
+        self.assertTrue(application_is_alive(p))
 
     def test_openport_app__no_errors(self):
         port = self.osinteraction.get_open_port()
