@@ -117,12 +117,16 @@ class OldVersionsTest(TestCase):
                     detach=True,
                     command=f"/app/block_port_and_run_openport.sh {port} --server {TEST_SERVER} --verbose "
                     + version.extra_args,
-                    network="host",
+                    # network="host",  # do not use network="host" because it will add iptables rules to the host.
                     volumes=[
                         f"{OLD_VERSION_DIR}/:/app/",
                     ],
-                    environment={"SERVER": TEST_SERVER.split("://")[1].split(":")[0]},
+                    environment={
+                        "SERVER": TEST_SERVER.split("://")[1].split(":")[0],
+                        "PORT": port,
+                    },
                     privileged=True,
+                    extra_hosts=["host.docker.internal:host-gateway"],
                 )
                 self.containers.append(container)
                 remote_host, remote_port, link = get_remote_host_and_port__docker(
