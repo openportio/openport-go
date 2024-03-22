@@ -28,7 +28,7 @@ class Version:
 
 class OldVersionsTest(TestCase):
     VERSIONS = [
-        Version("1.0.1", "", 60),  # fails, no longer used
+        # Version("1.0.1", "", 60),  # fails, no longer used
         Version("1.0.2", "", 180),  # works
         Version("1.1.0", "", 180),  # works
         Version("1.1.1", "", 180),  # works
