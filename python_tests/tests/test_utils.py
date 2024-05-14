@@ -163,7 +163,7 @@ class SimpleTcpClient:
 
     def send(self, request):
         # noinspection PyTypeChecker
-        self.sock.send("{}\n".format(request).encode("utf-8"))
+        self.sock.send(str(request).encode("utf-8"))
 
         data = self.sock.recv(1024)
         response = ""
@@ -296,8 +296,11 @@ def get_remote_host_and_port_from_output(
             port = int(m.group("local_port"))
         else:
             host, port = m.group("host"), int(m.group("remote_port"))
-        m = re.search(r"to first go here: ([a-zA-Z0-9\:/\.\-]+) .", text)
-        link = m.group(1) if m is not None else None
+        m = re.search(r"https://([\S]+)/l/([\S]+)", text)
+        if m is None:
+            link = None
+        else:
+            link = f"https://{m.group(1)}/l/{m.group(2)}"
         return host, port, link
 
 
@@ -368,7 +371,9 @@ def get_remote_host_and_port__generic(
         if result:
             return result
 
-    raise Exception("remote host and port not found in output: {}".format(all_output))
+    raise Exception(
+        "remote host and port not found in output: {}".format("".join(all_output))
+    )
 
 
 def wait_for_response(
@@ -434,17 +439,18 @@ def kill_all_processes(processes_to_kill):
             logger.exception(e)
 
 
-def click_open_for_ip_link(link):
-    if link:
-        # link = link.replace("https", "http")
-        logger.info("clicking link %s" % link)
-        #        ctx = ssl.create_default_context()
-        #        ctx.check_hostname = False
-        #        ctx.verify_mode = ssl.CERT_NONE
-        req = Request(link)
-        response = run_method_with_timeout(lambda: urlopen(req, timeout=20).read(), 20)
-        assert response is not None
-        assert "is now open" in response.decode("utf-8")
+def click_open_for_ip_link(link, fail_if_link_is_none: bool = True):
+    if fail_if_link_is_none:
+        assert link is not None
+    # link = link.replace("https", "http")
+    logger.info("clicking link %s" % link)
+    #        ctx = ssl.create_default_context()
+    #        ctx.check_hostname = False
+    #        ctx.verify_mode = ssl.CERT_NONE
+    req = Request(link)
+    response = run_method_with_timeout(lambda: urlopen(req, timeout=120).read(), 20)
+    assert response is not None
+    assert "is now open" in response.decode("utf-8")
 
 
 servers = {}

@@ -45,7 +45,7 @@ from tests.test_utils import (
 logger = get_logger(__name__)
 
 # TEST_SERVER = 'https://eu.openport.io'
-# TEST_SERVER = 'https://openport.io'
+# TEST_SERVER = "https://openport.io"
 # TEST_SERVER = 'https://test2.openport.io'
 # TEST_SERVER = 'https://test2.openport.xyz'
 # TEST_SERVER = 'https://test.openport.xyz'
@@ -80,7 +80,7 @@ class AppTests(unittest.TestCase):
     kill = "kill"
     kill_all = "kill-all"
     version = "version"
-    app_version = "2.2.0"
+    app_version = "2.2.1"
     forward = "forward"
     list = "list"
     ws_options = []
@@ -281,10 +281,21 @@ class AppTests(unittest.TestCase):
     def test_openport_app__live_site(self):
         port = self.osinteraction.get_open_port()
 
-        p = subprocess.Popen(
+        command = (
             self.openport_exe
-            + ["--local-port", "%s" % port, "--verbose", "--database", self.db_file]
-            + self.ws_options,
+            + [
+                "--local-port",
+                "%s" % port,
+                "--verbose",
+                "--database",
+                str(self.db_file),
+            ]
+            + self.ws_options
+        )
+        logging.warning(f'command: {" ".join(command)}')
+
+        p = subprocess.Popen(
+            command,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -294,6 +305,7 @@ class AppTests(unittest.TestCase):
         click_open_for_ip_link(link)
 
         self.assertEqual(1, get_nr_of_shares_in_db_file(self.db_file))
+        sleep(1)
 
         #        self.assertFalse(openportmanager.manager_is_running(8001))
 
@@ -765,9 +777,10 @@ class AppTests(unittest.TestCase):
 
             return run_method_with_timeout(is_running, args=[in_session2], timeout_s=5)
 
-        wait_for_response(foo, timeout=10)
         logger.debug("sleeping now")
+        wait_for_response(foo, timeout=10)
         logger.debug("wait_for_response done")
+        sleep(3)
         check_tcp_port_forward(
             self,
             remote_host="127.0.0.1",
@@ -1215,7 +1228,7 @@ class AppTests(unittest.TestCase):
 
         # self.assertFalse(application_is_alive(p_manager2))
 
-        sleep(1)
+        sleep(5)  # wait for app to restart
         # todo: replace by /register
 
         share = self.db_handler.get_share_by_local_port(port)
@@ -1270,16 +1283,16 @@ class AppTests(unittest.TestCase):
 
         self.assertEqual(1, get_nr_of_shares_in_db_file(self.db_file))
 
-        p_manager2 = subprocess.Popen(
+        p_manager = subprocess.Popen(
             self.openport_exe
             + [self.restart_shares, "--database", self.db_file, "--verbose"],
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
-        self.osinteraction.print_output_continuously_threaded(p_manager2, "p_manager2")
-        self.processes_to_kill.append(p_manager2)
-        run_method_with_timeout(p_manager2.wait, 10)
-        sleep(1)
+        self.osinteraction.print_output_continuously_threaded(p_manager, "p_manager")
+        self.processes_to_kill.append(p_manager)
+        run_method_with_timeout(p_manager.wait, 10)
+        sleep(5)  # wait for app to restart
 
         share = self.db_handler.get_share_by_local_port(port)
         logger.debug(share)
@@ -2617,17 +2630,24 @@ for i in range(%s):
         remote_host, remote_port, link = get_remote_host_and_port(
             p, self.osinteraction, timeout=60
         )
+
+        messing_with_dns = False
+        if messing_with_dns:
+            remote_host = remote_host.replace(".io", ".xyz")
+            link = link.replace(".io", ".xyz")
+            tunnel_server = tunnel_server.replace(".io", ".xyz")
+
         click_open_for_ip_link(link)
         self.assertEqual(tunnel_server, remote_host)
         check_tcp_port_forward(self, remote_host, local_port, remote_port)
         p.kill()
 
     def test_all_servers_live(self):
-        self.check_live_server("openport.io")
-        sleep(1)
-        self.check_live_server("spr.openport.io")
-        sleep(1)
-        self.check_live_server("us.openport.io")
+        live_servers = ["openport.io", "spr.openport.io", "us.openport.io"]
+        for live_server in live_servers:
+            with self.subTest(live_server):
+                self.check_live_server(live_server)
+                sleep(1)
 
     def test_rm_session(self):
         port = self.osinteraction.get_open_port()
