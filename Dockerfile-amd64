@@ -25,4 +25,4 @@ RUN go mod download
 
 COPY src/ /apps/go/
 
-RUN go build -ldflags "-s -w" -o /openport-amd64 apps/openport/main.go
+RUN go build -ldflags "-s -w" -tags netgo -o /openport-amd64 apps/openport/main.go

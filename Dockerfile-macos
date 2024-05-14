@@ -34,4 +34,4 @@ RUN go mod download
 
 COPY src/ /apps/go/
 
-RUN go build -ldflags "-s -w" -o /openport-macos apps/openport/main.go
+RUN go build -ldflags "-s -w" -tags netgo -o /openport-macos apps/openport/main.go
