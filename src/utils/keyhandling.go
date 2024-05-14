@@ -14,6 +14,10 @@ import (
 )
 
 func GetHomeDir() string {
+	if os.Getenv("HOME") != "" {
+		return os.Getenv("HOME")
+	}
+
 	currentUser, err := user.Current()
 	if err != nil {
 		log.Warn(err)
