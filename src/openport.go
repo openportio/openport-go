@@ -36,7 +36,7 @@ import (
 	"time"
 )
 
-const VERSION = "2.2.0"
+const VERSION = "2.2.1"
 const USER_CONFIG_FILE = "/etc/openport/users.conf"
 const DEFAULT_SERVER = "https://openport.io"
 
@@ -578,8 +578,14 @@ func (app *App) CreateTunnel() {
 				fallbackServer := fmt.Sprintf("%s://%s/ws", protocol, app.Session.FallbackSshServerIp)
 				log.Debugf("Connecting to %s", primaryServer)
 				err = wsClient.Connect(primaryServer, fallbackServer, app.Session.Proxy)
-				if err == nil {
-					err = wsClient.StartReverseTunnel(app.Session, response.Message)
+				if err != nil {
+					log.Warn(err)
+				} else {
+					callback := func() {
+						app.Session.PrintMessage(response.Message)
+						app.MarkConnected()
+					}
+					err = wsClient.StartReverseTunnel(app.Session, callback)
 				}
 			} else {
 				err = app.StartReverseTunnel(key, app.Session, response.Message)
@@ -991,4 +997,52 @@ func (app *App) RemoveSession(port int) {
 	} else {
 		log.Infof("Session for local port %d deleted.", port)
 	}
+}
+
+func (app *App) RunSelfTest() {
+	app.InitFiles()
+	go app.CreateTunnel()
+
+	// sleep until the tunnel is created
+	for {
+		log.Infof("Waiting for the tunnel to be created")
+		time.Sleep(1 * time.Second)
+		if app.ConnectedState.IsConnected() {
+			break
+		}
+
+	}
+	// click the open-for-ip link
+	log.Info("Opening the open-for-ip link")
+	httpClient := GetHttpClient(app.Session.Proxy)
+	if app.Session.OpenPortForIpLink != "" {
+		response, err := httpClient.Get(app.Session.OpenPortForIpLink)
+		if err != nil {
+			log.Fatal(err)
+
+		}
+		bodyBytes, err := io.ReadAll(response.Body)
+
+		defer response.Body.Close()
+		log.Infof("Response: %s", bodyBytes)
+	}
+
+	// Test the tunnel
+	log.Info("Testing the tunnel")
+	response, err := httpClient.Get(fmt.Sprintf("http://" + app.Session.SshServer + ":" + strconv.Itoa(app.Session.RemotePort) + "/info"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer response.Body.Close()
+	bodyBytes, err := io.ReadAll(response.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	body := strings.Trim(string(bodyBytes), "\n")
+	log.Infof("Response: %s", body)
+
+	if body != "openport" {
+		log.Fatalf("wrong response: <%s>", body)
+	}
+	log.Info("Tunnel is working")
 }

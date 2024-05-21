@@ -37,6 +37,9 @@ func run(app *o.App, args []string) {
 	var exitOnFailureTimeout int
 	var sshServer string
 	var help = false
+	var useIpLinkProtection string
+	var useWS = false
+	var noSSL = false
 
 	addVerboseFlag := func(set *flag.FlagSet) {
 		set.BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
@@ -81,14 +84,29 @@ func run(app *o.App, args []string) {
 
 	defaultFlagSet := flag.NewFlagSet(args[0], flag.ExitOnError)
 	addSharedFlags(defaultFlagSet)
-	useIpLinkProtection := defaultFlagSet.String("ip-link-protection", "",
-		"Let users click a secret link before they can "+
-			"access this port. This overwrites the setting in your profile. choices=[True, False]")
+
+	addIpLinkProtectionFlag := func(set *flag.FlagSet) {
+		set.StringVar(&useIpLinkProtection, "ip-link-protection", "",
+			"Let users click a secret link before they can "+
+				"access this port. This overwrites the setting in your profile. choices=[True, False]")
+	}
+
+	addIpLinkProtectionFlag(defaultFlagSet)
+
 	httpForward := defaultFlagSet.Bool("http-forward", false, "Request an http forward, so you can connect to port 80 on the server.")
-	defaultFlagSet.StringVar(&sshServer, "request-server", "", "The requested tunnel server")
-	utils.FailOnError(defaultFlagSet.MarkHidden("request-server"), "")
-	useWS := defaultFlagSet.Bool("ws", false, "Use the websockets protocol instead of ssh.")
-	noSSL := defaultFlagSet.Bool("no-ssl", false, "Connect to the Openport servers without using SSL (only used if the --ws flag is set)")
+
+	addRequestServerFlag := func(set *flag.FlagSet) {
+		set.StringVar(&sshServer, "request-server", "", "The requested tunnel server")
+		utils.FailOnError(set.MarkHidden("request-server"), "")
+	}
+	addRequestServerFlag(defaultFlagSet)
+
+	addWSFlags := func(set *flag.FlagSet) {
+		set.BoolVar(&useWS, "ws", false, "Use the websockets protocol instead of ssh.")
+		set.BoolVar(&noSSL, "no-ssl", false, "Connect to the Openport servers without using SSL (only used if the --ws flag is set)")
+
+	}
+	addWSFlags(defaultFlagSet)
 
 	forwardTunnelFlagSet := flag.NewFlagSet("forward", flag.ExitOnError)
 	addSharedFlags(forwardTunnelFlagSet)
@@ -100,6 +118,18 @@ func run(app *o.App, args []string) {
 	addLegacyFlag(defaultFlagSet, "manager-port")
 
 	flagSets[""] = defaultFlagSet
+
+	selfTestFlagSet := flag.NewFlagSet("selftest", flag.ExitOnError)
+	selfTestFlagSet.StringVar(&socksProxy, "proxy", "", "Socks5 proxy to use. Format: socks5://user:pass@host:port")
+	addVerboseFlag(selfTestFlagSet)
+	addDatabaseFlag(selfTestFlagSet)
+	addServerFlag(selfTestFlagSet)
+	addHelpFlag(selfTestFlagSet)
+	addIpLinkProtectionFlag(selfTestFlagSet)
+	addRequestServerFlag(selfTestFlagSet)
+	addWSFlags(selfTestFlagSet)
+	flagSets["selftest"] = selfTestFlagSet
+
 	flagSets["forward"] = forwardTunnelFlagSet
 
 	versionFlagSet := flag.NewFlagSet("version", flag.ExitOnError)
@@ -284,6 +314,41 @@ func run(app *o.App, args []string) {
 		}
 		app.RemoveSession(port)
 		app.ExitCode <- o.EXIT_CODE_RM
+
+	case "selftest":
+		// This is a test command that is used to test the client.
+		utils.FailOnError(selfTestFlagSet.Parse(args[2:]), "error parsing args for selftest.")
+
+		if help {
+			println("Use this command to run a quick self-test of the application.")
+			println("Usage: openport selftest [arguments]")
+			selfTestFlagSet.PrintDefaults()
+			app.ExitCode <- o.EXIT_CODE_HELP
+			return
+		}
+
+		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
+		controlPort := app.StartControlServer(-1)
+
+		app.Session = db.Session{
+			LocalPort:           controlPort,
+			UseIpLinkProtection: useIpLinkProtection,
+			HttpForward:         *httpForward,
+			Server:              server,
+			KeepAliveSeconds:    keepAliveSeconds,
+			Proxy:               socksProxy,
+			Active:              true,
+			ForwardTunnel:       false,
+			RemotePort:          -1,
+			SshServer:           sshServer,
+			UseWS:               useWS,
+			NoSSL:               noSSL,
+			AutomaticRestart:    automaticRestart,
+			AppManagementPort:   controlPort,
+		}
+
+		app.RunSelfTest()
+
 	default:
 		forwardTunnel := args[1] == "forward"
 		var remotePortInt int
@@ -298,7 +363,7 @@ func run(app *o.App, args []string) {
 				app.ExitCode <- o.EXIT_CODE_HELP
 				return
 			}
-			if useWS != nil && *useWS {
+			if useWS {
 				log.Warn("Websockets are not supported for forward tunnels (yet). Let us know if you need this feature.")
 				app.ExitCode <- o.EXIT_CODE_INVALID_ARGUMENT
 				return
@@ -377,7 +442,7 @@ func run(app *o.App, args []string) {
 
 		app.Session = db.Session{
 			LocalPort:           port,
-			UseIpLinkProtection: *useIpLinkProtection,
+			UseIpLinkProtection: useIpLinkProtection,
 			HttpForward:         *httpForward,
 			Server:              server,
 			KeepAliveSeconds:    keepAliveSeconds,
@@ -386,8 +451,8 @@ func run(app *o.App, args []string) {
 			ForwardTunnel:       forwardTunnel,
 			RemotePort:          remotePortInt,
 			SshServer:           sshServer,
-			UseWS:               *useWS,
-			NoSSL:               *noSSL,
+			UseWS:               useWS,
+			NoSSL:               noSSL,
 			AutomaticRestart:    automaticRestart,
 		}
 		controlPort := app.StartControlServer(controlPort)

@@ -7,3 +7,5 @@ export HOME
 go build -v -o openport apps/openport/main.go
 
 ./openport --help
+#./openport selftest --help
+#./openport selftest --ws -v --no-ssl
