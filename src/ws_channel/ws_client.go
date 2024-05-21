@@ -164,13 +164,13 @@ func NewWSClient() *WSClient {
 	return &WSClient{}
 }
 
-func (client *WSClient) StartReverseTunnel(session database.Session, message string) error {
+func (client *WSClient) StartReverseTunnel(session database.Session, successCallback func()) error {
 
 	err := client.InitForward(session.SessionToken, session.RemotePort)
 	if err != nil {
 		return err
 	}
-	session.PrintMessage(message)
+	successCallback()
 	client.ForwardPort(session.LocalPort)
 	return nil
 
