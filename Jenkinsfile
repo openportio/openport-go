@@ -3,6 +3,7 @@ pipeline {
   stages {
     stage('Run Tests') {
       steps {
+        bitbucketStatusNotify(buildState: 'INPROGRESS')
         sh '''rm -rf test-results/*'''
         sh '''docker compose up --build --abort-on-container-exit'''
         sh '''cd python_tests ; make test'''
@@ -27,6 +28,10 @@ pipeline {
             subject: "ERROR CI: ${env.JOB_NAME}",
             to: "jandebleser@gmail.com"
         )
+        bitbucketStatusNotify(buildState: 'FAILED')
+    }
+    success {
+        bitbucketStatusNotify(buildState: 'SUCCESSFUL')
     }
   }
   options {
