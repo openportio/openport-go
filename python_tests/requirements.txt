@@ -1,5 +1,5 @@
 paramiko==2.12.0
-SQLAlchemy==1.4.44
+SQLAlchemy==1.4.53
 argparse==1.4.0
 cryptography==38.0.4
 ipaddress==1.0.23
