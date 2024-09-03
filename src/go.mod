@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/gorilla/mux v1.7.4
-	github.com/gorilla/websocket v1.5.1
+	github.com/gorilla/websocket v1.5.3
 	github.com/jedib0t/go-pretty v4.3.0+incompatible
 	github.com/jinzhu/gorm v1.9.2
 	github.com/judwhite/go-svc v1.2.1
