@@ -17,7 +17,7 @@ pipeline {
       sh '''docker volume prune -f || true'''
       junit 'test-results/*.xml'
     }
-    failure {
+    unsuccessful {
         mail(
             body: "<br>Project: ${env.JOB_NAME} <br>Build Number: ${env.BUILD_NUMBER} <br>build: ${env.BUILD_URL}",
             cc: '',
