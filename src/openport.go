@@ -36,7 +36,7 @@ import (
 	"time"
 )
 
-const VERSION = "2.2.1"
+const VERSION = "2.2.2"
 const USER_CONFIG_FILE = "/etc/openport/users.conf"
 const DEFAULT_SERVER = "https://openport.io"
 
@@ -103,6 +103,13 @@ func CreateApp() *App {
 	}
 	app.ConnectedState = &DisconnectedState{app: app}
 	return app
+}
+
+func (app *App) SaveState() {
+	err := app.DbHandler.Save(&app.Session)
+	if err != nil {
+		log.Warn(err)
+	}
 }
 
 var httpSleeper = utils.IncrementalSleeper{
@@ -246,9 +253,8 @@ func (app *App) RegisterKey(keyBindingToken string, name string, proxy string, s
 		log.Fatalf("Body error: %s", err)
 	}
 	log.Debugf(string(body))
-	var jsonData = []byte(body)
 	response := RegisterKeyResponse{}
-	jsonErr := json.Unmarshal(jsonData, &response)
+	jsonErr := json.Unmarshal(body, &response)
 	if jsonErr != nil {
 		log.Fatalf("Json Decode error: %s", err)
 	}
@@ -442,7 +448,7 @@ func (app *App) KillAll() {
 	}
 }
 
-func (app *App) StopSession(w http.ResponseWriter, r *http.Request) {
+func (app *App) StopSession(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintln(w, "Ok")
 	app.Stop(EXIT_CODE_REMOTE_STOP)
 
@@ -450,7 +456,7 @@ func (app *App) StopSession(w http.ResponseWriter, r *http.Request) {
 	// TODO: Force flag
 }
 
-func (app *App) InfoRequest(w http.ResponseWriter, r *http.Request) {
+func (app *App) InfoRequest(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintln(w, "openport")
 }
 
@@ -549,7 +555,7 @@ func (app *App) CreateTunnel() {
 	if err != nil {
 		log.Warnf("error saving session: %s", err)
 	}
-	defer app.SetInactive(&app.Session)
+	defer app.DbHandler.SetInactive(&app.Session)
 
 	go app.ConnectedState.DoState()
 
@@ -619,7 +625,9 @@ func (app *App) Stop(exitCode int) {
 
 func GetHttpClient(proxy string) http.Client {
 	if proxy == "" {
-		return http.Client{}
+		return http.Client{
+			Timeout: 60 * time.Second,
+		}
 	} else {
 		p := strings.Replace(proxy, "socks5h", "socks5", 1)
 		u, err := url.Parse(p)
@@ -631,7 +639,7 @@ func GetHttpClient(proxy string) http.Client {
 		}
 		return http.Client{
 			Transport: tr,
-			Timeout:   30 * time.Second,
+			Timeout:   60 * time.Second,
 		}
 	}
 }
@@ -673,9 +681,8 @@ func (app *App) RequestPortForward(session *db.Session, publicKey []byte) (PortR
 		return PortResponse{}, err
 	}
 	log.Debugf(string(body))
-	var jsonData = []byte(body)
 	response := PortResponse{}
-	jsonErr := json.Unmarshal(jsonData, &response)
+	jsonErr := json.Unmarshal(body, &response)
 	if jsonErr != nil {
 		log.Warnf("json error: %s", err)
 		return PortResponse{}, jsonErr
@@ -684,7 +691,7 @@ func (app *App) RequestPortForward(session *db.Session, publicKey []byte) (PortR
 	if response.Error != "" {
 		if response.FatalError {
 			log.Infof("Stopping session on request of server: %s", response.Error)
-			app.SetInactive(session)
+			app.DbHandler.SetInactive(session)
 			app.ExitCode <- EXIT_CODE_FATAL_SESSION_ERROR
 		}
 		return PortResponse{}, ServerResponseError{response.Error}
@@ -901,11 +908,6 @@ func handleRequestOnForwardTunnel(sshClient *ssh.Client, localConn net.Conn, ses
 	return
 }
 
-func (app *App) SetInactive(session *db.Session) {
-	session.Active = false
-	app.DbHandler.Save(session)
-}
-
 type ConnectionState interface {
 	DoState()
 	IsConnected() bool
@@ -919,6 +921,8 @@ func (state *ConnectedState) DoState() {
 	for {
 		connected := <-state.app.Connected
 		log.Debugf("Connected state: got Connected:  %t", connected)
+		state.app.Session.Connected = connected
+		state.app.SaveState()
 		if connected {
 			continue
 		} else {
@@ -955,6 +959,8 @@ func (state *DisconnectedState) DoState() {
 		state.app.ExitCode <- EXIT_CODE_NO_CONNECTION
 	case connected := <-state.app.Connected:
 		log.Debugf("disconnected state: got Connected:  %t", connected)
+		state.app.Session.Connected = connected
+		state.app.SaveState()
 		if connected {
 			state.app.ConnectedState = &ConnectedState{
 				app: state.app,
