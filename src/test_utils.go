@@ -44,7 +44,7 @@ func startHTTPServer(port int) *http.Server {
 }
 
 var httpClient = http.Client{
-	Timeout: 2 * time.Second,
+	Timeout: 5 * time.Second,
 }
 
 func ClickLink(t *testing.T, link string) {
@@ -102,7 +102,7 @@ func WaitForApp(t *testing.T, app *App) {
 	appReady := make(chan string, 1)
 
 	go func() {
-		for app.Session.RemotePort < 1 {
+		for !app.ConnectedState.IsConnected() {
 			time.Sleep(10 * time.Millisecond)
 		}
 		appReady <- fmt.Sprintf("ok, got port %d", app.Session.RemotePort)

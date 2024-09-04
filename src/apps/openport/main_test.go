@@ -85,10 +85,10 @@ func TestSaveForwardTunnel(t *testing.T) {
 
 	port := openport.GetFreePort(t)
 
-	reserveApp := openport.CreateApp()
-	defer reserveApp.Stop(0)
+	reverseApp := openport.CreateApp()
+	defer reverseApp.Stop(0)
 
-	go run(reserveApp, []string{
+	go run(reverseApp, []string{
 		OPENPORT_EXE,
 		strconv.Itoa(port),
 		"--server", TEST_SERVER,
@@ -96,9 +96,10 @@ func TestSaveForwardTunnel(t *testing.T) {
 		"--database", dbFile,
 		"--restart-on-reboot",
 	})
-	openport.WaitForApp(t, reserveApp)
-	openport.ClickLink(t, reserveApp.Session.OpenPortForIpLink)
-	openport.CheckTcpForward(t, port, reserveApp.Session.SshServer, reserveApp.Session.RemotePort)
+	openport.WaitForApp(t, reverseApp)
+	openport.ClickLink(t, reverseApp.Session.OpenPortForIpLink)
+	openport.CheckTcpForward(t, port, reverseApp.Session.SshServer, reverseApp.Session.RemotePort)
+	openport.AssertEqual(t, true, reverseApp.Session.Connected)
 
 	forwardPort := openport.GetFreePort(t)
 
@@ -112,17 +113,23 @@ func TestSaveForwardTunnel(t *testing.T) {
 		"--local-port", strconv.Itoa(forwardPort),
 		"--exit-on-failure-timeout", "10",
 		"--verbose",
-		"--remote-port", strconv.Itoa(reserveApp.Session.RemotePort),
+		"--remote-port", strconv.Itoa(reverseApp.Session.RemotePort),
 		"--restart-on-reboot",
 	})
 
 	openport.WaitForApp(t, forwardApp)
-	time.Sleep(1 * time.Second)
 
 	openport.CheckTcpForward(t, port, "127.0.0.1", forwardPort)
+	openport.AssertEqual(t, true, forwardApp.Session.Connected)
+
 	activeSessions, err := forwardApp.DbHandler.GetAllActive()
 	openport.FailIfError(t, err)
 	openport.AssertEqual(t, 2, len(activeSessions))
+	allConnected := true
+	for _, session := range activeSessions {
+		allConnected = allConnected && session.Connected
+	}
+	openport.AssertEqual(t, true, allConnected)
 
 	forwardApp.Stop(0)
 	getExitCode := func() string {
@@ -152,10 +159,31 @@ func TestSaveForwardTunnel(t *testing.T) {
 	}
 	openport.TimeoutFunction(t, restartShares, 2*time.Second)
 
-	time.Sleep(1 * time.Second)
-	activeSessions, err = forwardApp.DbHandler.GetAllActive()
-	openport.FailIfError(t, err)
-	openport.AssertEqual(t, 2, len(activeSessions))
+	waitForActiveSessions := func() string {
+		endTicker := time.NewTicker(20 * time.Second)
+		for {
+			activeSessions, err := forwardApp.DbHandler.GetAllActive()
+			openport.FailIfError(t, err)
+			if len(activeSessions) == 2 {
+				allConnected := true
+				for _, session := range activeSessions {
+					allConnected = allConnected && session.Connected
+				}
+				if allConnected {
+					return "ok"
+				}
+			}
+			select {
+			case <-endTicker.C:
+				return "not ok"
+			default:
+				time.Sleep(50 * time.Millisecond)
+				println("waiting for active sessions")
+			}
+		}
+	}
+	openport.AssertEqual(t, "ok", openport.TimeoutFunction(t, waitForActiveSessions, 20*time.Second))
+	time.Sleep(20000 * time.Millisecond)
 
 	openport.CheckTcpForward(t, port, "127.0.0.1", forwardPort)
 }

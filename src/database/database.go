@@ -41,6 +41,8 @@ type Session struct {
 	AutomaticRestart      bool   `gorm:"-"`
 	UseWS                 bool
 	NoSSL                 bool
+
+	Connected bool
 }
 
 func (s Session) PrintMessage(message string) {
@@ -140,6 +142,14 @@ func (dbHandler *DBHandler) GetAllActive() ([]Session, error) {
 	var sessions []Session
 	db.Where("active = 1").Find(&sessions)
 	return sessions, db.Error
+}
+
+func (dbHandler *DBHandler) SetInactive(session *Session) {
+	session.Active = false
+	err := dbHandler.Save(session)
+	if err != nil {
+		log.Warn(err)
+	}
 }
 
 func (dbHandler *DBHandler) GetSessionsToRestart() ([]Session, error) {
