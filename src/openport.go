@@ -54,7 +54,7 @@ const EXIT_CODE_LIST = 0
 const EXIT_CODE_HELP = 0
 const EXIT_CODE_RM = 0
 
-var OPENPORT_LOG_PATH = path.Join(utils.OPENPORT_HOME, "openport.log")
+var LogPath = path.Join(utils.OPENPORT_HOME, "openport.log")
 
 type PortResponse struct {
 	ServerIP              string  `json:"server_ip"`

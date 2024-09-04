@@ -21,7 +21,7 @@ type program struct {
 func main() {
 	prg := &program{}
 	//o.InitLogging(true, "C:\\Users\\vagrant\\openport.log")
-	o.InitLogging(true, o.OPENPORT_LOG_PATH)
+	o.InitLogging(true, o.LogPath)
 
 	// Call svc.Run to start your program/service.
 	if err := svc.Run(prg); err != nil {

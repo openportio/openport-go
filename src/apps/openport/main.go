@@ -199,7 +199,7 @@ func run(app *o.App, args []string) {
 			app.ExitCode <- o.EXIT_CODE_HELP
 			return
 		}
-		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
+		o.InitLogging(verbose, o.LogPath)
 		tail := registerKeyFlagSet.Args()
 		if *registerKeyToken == "" {
 			if len(tail) == 0 {
@@ -228,7 +228,7 @@ func run(app *o.App, args []string) {
 			app.ExitCode <- o.EXIT_CODE_HELP
 			return
 		}
-		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
+		o.InitLogging(verbose, o.LogPath)
 		utils.EnsureHomeFolderExists()
 		tail := killFlagSet.Args()
 		var err error
@@ -255,7 +255,7 @@ func run(app *o.App, args []string) {
 			app.ExitCode <- o.EXIT_CODE_HELP
 			return
 		}
-		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
+		o.InitLogging(verbose, o.LogPath)
 		app.InitFiles()
 		app.KillAll()
 	case "restart-sessions", "restart", "restartsessions":
@@ -267,7 +267,7 @@ func run(app *o.App, args []string) {
 			app.ExitCode <- o.EXIT_CODE_HELP
 			return
 		}
-		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
+		o.InitLogging(verbose, o.LogPath)
 		if daemonize {
 			app.StartDaemon(args)
 		} else {
@@ -282,7 +282,7 @@ func run(app *o.App, args []string) {
 			app.ExitCode <- o.EXIT_CODE_HELP
 			return
 		}
-		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
+		o.InitLogging(verbose, o.LogPath)
 		app.InitFiles()
 		app.ListSessions()
 		app.ExitCode <- o.EXIT_CODE_LIST
@@ -296,7 +296,7 @@ func run(app *o.App, args []string) {
 			app.ExitCode <- o.EXIT_CODE_HELP
 			return
 		}
-		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
+		o.InitLogging(verbose, o.LogPath)
 		app.InitFiles()
 		tail := rmFlagSet.Args()
 		var err error
@@ -327,7 +327,7 @@ func run(app *o.App, args []string) {
 			return
 		}
 
-		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
+		o.InitLogging(verbose, o.LogPath)
 		controlPort := app.StartControlServer(-1)
 
 		app.Session = db.Session{
@@ -411,7 +411,7 @@ func run(app *o.App, args []string) {
 				log.Fatalf("Remote port needs to be an integer: %s %s", remotePort, err)
 			}
 		}
-		o.InitLogging(verbose, o.OPENPORT_LOG_PATH)
+		o.InitLogging(verbose, o.LogPath)
 		app.ExitOnFailureTimeout = exitOnFailureTimeout
 
 		tail := defaultFlagSet.Args()
