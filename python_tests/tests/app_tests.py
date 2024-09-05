@@ -80,7 +80,7 @@ class AppTests(unittest.TestCase):
     kill = "kill"
     kill_all = "kill-all"
     version = "version"
-    app_version = "2.2.1"
+    app_version = "2.2.2"
     forward = "forward"
     list = "list"
     ws_options = []
@@ -2444,7 +2444,7 @@ for i in range(%s):
         import toxiproxy
 
         # make sure you've run
-        # docker-compose -f docker-compose/toxiproxy.yaml up
+        # docker compose -f docker-compose/toxiproxy.yaml up
         APIConsumer.host = TOXI_PROXY_HOST
         server = toxiproxy.Toxiproxy()
         server.destroy_all()

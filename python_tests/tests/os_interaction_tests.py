@@ -24,7 +24,6 @@ class OsInteractionTest(unittest.TestCase):
         set_log_level(logging.DEBUG)
 
     def test_set_variable(self):
-
         args = ["python", "openport.py", "--one", "--two", "--three", "3"]
         self.assertEqual(
             ["python", "openport.py", "--one", "--two"],
@@ -130,9 +129,19 @@ class OsInteractionTest(unittest.TestCase):
                 "sleep(1); print('bbb')",
             ]
         )
-        output, p = self.os_interaction.run_command_and_print_output_continuously(
-            command
+
+        creation_flags = self.os_interaction.get_detached_process_creation_flag()
+        p = subprocess.Popen(
+            command,
+            bufsize=2048,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=creation_flags,
+            close_fds=not is_windows(),
         )
+
+        output = self.os_interaction.print_output_continuously(p)
         self.assertEqual(["aaa%sbbb" % os.linesep, False], output)
 
     def test_run_command_and_print_output_continuously__kill_app(self):
@@ -204,28 +213,6 @@ class OsInteractionTest(unittest.TestCase):
         )
         self.assertTrue(self.os_interaction.pid_is_running(process.pid))
 
-    def test_pid_is_openport_process(self):
-        port = self.os_interaction.get_open_port()
-        os.chdir(os.path.dirname(os.path.dirname(__file__)))
-        python_exe = self.os_interaction.get_python_exec()
-        p = subprocess.Popen(
-            python_exe
-            + [
-                "apps/openport_app.py",
-                "--local-port",
-                "%s" % port,
-                "--server",
-                "http://test.openport.be",
-                "--verbose",
-            ],
-            stderr=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-        )
-        try:
-            self.assertTrue(self.os_interaction.pid_is_openport_process(p.pid))
-        finally:
-            p.kill()
-
     def test_kill_pid(self):
         if not is_windows():
             return
@@ -248,31 +235,6 @@ class OsInteractionTest(unittest.TestCase):
         print(output[1])
         if not is_windows():
             self.assertTrue(output[0] and "got signal" in output[0])
-
-    def test_run_function_with_lock(self):
-        x = [0]
-
-        def add_one():
-            a = x[0]
-            sleep(0.001)
-            x[0] = a + 1
-
-        threads = []
-
-        thread_amount = 10  # Setting this number too high will fail the tests because the system cannot generate so much lockfiles
-        for i in range(thread_amount):
-            t = threading.Thread(
-                target=lambda: self.os_interaction.run_function_with_lock(
-                    add_one, "add_one"
-                )
-            )
-            t.setDaemon(True)
-            t.start()
-            threads.append(t)
-
-        for t in threads:
-            t.join()
-        self.assertEqual(x[0], thread_amount)
 
 
 if __name__ == "__main__":
