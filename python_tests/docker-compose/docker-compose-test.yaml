@@ -3,27 +3,28 @@ version: '3'
 services:
   toxiproxy:
     image: shopify/toxiproxy:2.1.4
-    ports:
-      - 8474:8474
-      - 22220:22220
+#    ports:
+#      - 8474:8474
+#      - 22220:22220
 
   openport-test:
     build:
       dockerfile: Dockerfile
       context: ..
     user: "${UID}:${GID}"
-
     volumes:
       - ..:/apps/openport
       - ../../test-results/:/test-results/
 #    command: python -m unittest tests.app_tests.AppTests.test_openport_app__daemonize
     environment:
       - KEY_REGISTRATION_TOKEN=${KEY_REGISTRATION_TOKEN}
+      - LOG_PATH=/apps/openport/logs
+      - HOME=/apps/openport/
     depends_on:
       - toxiproxy
       - proxy-no-password
 
   proxy-no-password:
     image: serjs/go-socks5-proxy
-    ports:
-      - 1080:1080
+#    ports:
+#      - 1080:1080

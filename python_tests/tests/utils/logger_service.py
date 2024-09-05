@@ -1,5 +1,6 @@
 import logging
 import logging.handlers
+import os
 from sys import stdout
 from tests.utils import osinteraction
 
@@ -23,9 +24,11 @@ def get_logger(name):
     ch.setLevel(log_level)
     logger.addHandler(ch)
 
-    os_interaction = osinteraction.getInstance(use_logger=False)
+    osi = osinteraction.getInstance(use_logger=False)
+    os.makedirs(osi.get_app_data_path(), exist_ok=True)
+
     fh = logging.handlers.RotatingFileHandler(
-        os_interaction.get_app_data_path("%s.log" % os_interaction.get_app_name()),
+        osi.get_app_data_path("openport.log"),
         maxBytes=1000000,
         backupCount=5,
     )
