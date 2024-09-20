@@ -1,4 +1,4 @@
-FROM golang:1.21.5-bullseye
+FROM golang:1.23.1-bullseye
 LABEL os=linux
 LABEL arch=armv6
 
