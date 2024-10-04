@@ -4,7 +4,6 @@ import os
 import subprocess
 from unittest import skip
 
-import xmlrunner
 import inspect
 
 from selenium import webdriver
@@ -14,7 +13,7 @@ import logging
 from tests.utils.crypt_service import get_token
 
 
-from tests.test_utils import (
+from tests.utils.utils import (
     run_command_with_timeout,
     get_remote_host_and_port,
     kill_all_processes,
@@ -344,5 +343,3 @@ class SiteInteractionTest(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main(testRunner=xmlrunner.XMLTestRunner(output="test-reports"))

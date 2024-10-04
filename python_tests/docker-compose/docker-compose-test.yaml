@@ -11,6 +11,9 @@ services:
     build:
       dockerfile: Dockerfile
       context: ..
+      args:
+        - UID=${UID}
+        - GID=${GID}
     user: "${UID}:${GID}"
     volumes:
       - ..:/apps/openport

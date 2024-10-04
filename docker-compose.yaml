@@ -1,4 +1,3 @@
-version: '3'
 services:
   client_tests:
     build:
@@ -7,7 +6,10 @@ services:
     command: sh -c "/openport-amd64 register ${KEY_REGISTRATION_TOKEN} --server https://test.openport.io && gotestsum --format standard-verbose --junitfile /apps/go/test-results/report.xml apps/openport/*.go"
     user: "${UID}:${GID}"
     volumes:
+      - ./src/:/apps/go
       - ./test-results:/apps/go/test-results/
       - ./test-results:/root/.openport/
+    environment:
+      - HOME=/apps/go/
   # // for debugging only
 #      - ./src/:/apps/go/src/

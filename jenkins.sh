@@ -23,3 +23,4 @@ docker compose $COMPOSE_ARGS down --remove-orphans
 cd python_tests || exit
 COMPOSE_ARGS="-f docker-compose/docker-compose-test.yaml -p $PROJECT_NAME"
 docker compose $COMPOSE_ARGS up --build --abort-on-container-exit
+docker compose $COMPOSE_ARGS down --remove-orphans

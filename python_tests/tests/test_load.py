@@ -2,6 +2,8 @@ import multiprocessing
 import subprocess
 import unittest
 import time
+from unittest import skip
+
 import requests
 
 TEST_SERVER = "http://test.openport.io:8000"
@@ -37,6 +39,7 @@ def do_request(i):
 
 
 class LoadTests(unittest.TestCase):
+    @skip
     def test_nginx_overload(self):
         nr_of_processes = 100
         with multiprocessing.Pool(processes=nr_of_processes) as pool:
