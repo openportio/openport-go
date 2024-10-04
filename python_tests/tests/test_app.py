@@ -8,7 +8,6 @@ from pathlib import Path
 from unittest import skip
 
 import requests
-import xmlrunner as xmlrunner
 from threading import Thread
 from time import sleep
 
@@ -18,7 +17,7 @@ from tests.utils.app_tcp_server import send_exit, is_running
 from tests.utils import osinteraction, dbhandler
 from tests.utils.logger_service import get_logger, set_log_level
 from tests.utils.utils import run_method_with_timeout
-from tests.test_utils import (
+from tests.utils.utils import (
     SimpleTcpServer,
     SimpleTcpClient,
     lineNumber,
@@ -29,13 +28,13 @@ from tests.test_utils import (
     print_shares_in_db,
     application_is_alive,
 )
-from tests.test_utils import get_nr_of_shares_in_db_file
-from tests.test_utils import (
+from tests.utils.utils import get_nr_of_shares_in_db_file
+from tests.utils.utils import (
     print_all_output,
     click_open_for_ip_link,
     check_tcp_port_forward,
 )
-from tests.test_utils import (
+from tests.utils.utils import (
     run_command_with_timeout,
     get_remote_host_and_port,
     kill_all_processes,
@@ -57,7 +56,7 @@ TEST_SERVER = "https://test.openport.io"
 TEST_SERVERS = ["test.openport.io", "test2.openport.io"]
 
 KEY_REGISTRATION_TOKEN = os.environ.get("KEY_REGISTRATION_TOKEN")
-
+# KEY_REGISTRATION_TOKEN = "5kMRM65H1V"
 
 if not osinteraction.is_windows():
     PYTHON_EXE = subprocess.getoutput("which python")
@@ -2743,5 +2742,3 @@ class AppTestWSNoSSL(AppTests):
     ws_options = ["--ws", "--no-ssl"]
 
 
-if __name__ == "__main__":
-    unittest.main(testRunner=xmlrunner.XMLTestRunner(output="test-reports"))
