@@ -1,4 +1,14 @@
-FROM golang:1.23.2-bullseye
+FROM debian:buster
+# Using the oldest version of debian that supplies the armhf architecture. Ubuntu 16.04 does not support armhf.
+
+MAINTAINER JanDeBleser
+
+RUN apt-get update && apt-get install -y software-properties-common wget gcc curl
+RUN wget https://go.dev/dl/go1.23.1.linux-amd64.tar.gz && \
+    rm -rf /usr/local/go &&  \
+    tar -C /usr/local -xzf go1.23.1.linux-amd64.tar.gz
+ENV PATH=$PATH:/usr/local/go/bin
+
 LABEL os=linux
 LABEL arch=armhf
 

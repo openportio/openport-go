@@ -15,7 +15,7 @@ from tests.utils.logger_service import set_log_level
 
 # from openport.apps import OpenportApp
 from tests.utils import osinteraction, dbhandler
-from tests.test_utils import (
+from tests.utils.utils import (
     set_default_args,
     wait_for_response,
     click_open_for_ip_link,

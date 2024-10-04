@@ -200,9 +200,6 @@ class OsInteraction(object):
         return port
 
     def get_base_path(self):
-        if self.is_compiled():
-            return os.path.dirname(sys.argv[0])
-        else:
             self.logger.debug("sys.argv %s" % sys.argv[0])
             #           base_path = os.path.dirname(os.path.dirname(sys.argv[0]))
             base_path = os.path.dirname(os.path.dirname(__file__))

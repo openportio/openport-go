@@ -5,7 +5,7 @@ build:
 	docker build -f Dockerfile -t openport-test .
 
 test: build
-	docker compose -f docker-compose/docker-compose-test.yaml up --build --abort-on-container-exit
+	GID=$(id -g) docker compose -f docker-compose/docker-compose-test.yaml up --build --abort-on-container-exit
 
 bash-test:
 	docker run -it -v $$(pwd):/apps/openport openport-test bash
@@ -24,3 +24,15 @@ run-proxy-test-go-no-password:
 
 start_dev_servers:
 	docker compose -f ./docker-compose/docker-compose-test.yaml up proxy-no-password toxiproxy
+
+update_requirements:
+	pip freeze > requirements.txt
+	pip uninstall -r requirements.txt -y
+	pip install -r requirements.in
+	pip freeze > requirements.txt
+
+install:
+	pip install -r requirements.in
+
+install_frozen:
+	pip install -r requirements.txt

@@ -5,12 +5,11 @@ import logging
 import threading
 
 import unittest
-import xmlrunner
 from tests.utils.osinteraction import OsInteraction, getInstance, is_windows
 import subprocess
 from time import sleep
 from tests.utils.logger_service import set_log_level
-from tests.test_utils import (
+from tests.utils.utils import (
     run_command_with_timeout,
     run_command_with_timeout_return_process,
 )
@@ -237,5 +236,3 @@ class OsInteractionTest(unittest.TestCase):
             self.assertTrue(output[0] and "got signal" in output[0])
 
 
-if __name__ == "__main__":
-    unittest.main(testRunner=xmlrunner.XMLTestRunner(output="test-reports"))
