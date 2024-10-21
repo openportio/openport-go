@@ -54,8 +54,30 @@ func (s Session) PrintMessage(message string) {
 	log.Infof(message)
 }
 
+type DBHandlerInterface interface {
+	InitDB()
+	GetForwardSession(remotePort int, sshServer string) (Session, error)
+	GetSession(localPort int) (Session, error)
+	Save(session *Session) error
+	GetAllActive() ([]Session, error)
+	SetInactive(session *Session)
+	Path() string
+	GetSessionsToRestart() ([]Session, error)
+	EnrichSessionWithHistory(d *Session) Session
+	DeleteSession(session Session) error
+	SetPath(dbPath string)
+}
+
 type DBHandler struct {
 	DbPath string
+}
+
+func (dbHandler *DBHandler) Path() string {
+	return dbHandler.DbPath
+}
+
+func (dbHandler *DBHandler) SetPath(dbPath string) {
+	dbHandler.DbPath = dbPath
 }
 
 func (dbHandler *DBHandler) InitDB() {

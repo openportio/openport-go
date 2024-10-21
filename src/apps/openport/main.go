@@ -26,6 +26,7 @@ var verbose = false
 func run(app *o.App, args []string) {
 
 	var port int
+	var dbPath string
 	var controlPort int
 	var server string
 	var restartOnReboot bool
@@ -49,7 +50,7 @@ func run(app *o.App, args []string) {
 	}
 
 	addDatabaseFlag := func(set *flag.FlagSet) {
-		set.StringVar(&app.DbHandler.DbPath, "database", db.DEFAULT_OPENPORT_DB_PATH, "Database file")
+		set.StringVar(&dbPath, "database", db.DEFAULT_OPENPORT_DB_PATH, "Database file")
 		utils.FailOnError(set.MarkHidden("database"), "")
 	}
 	addLegacyFlag := func(set *flag.FlagSet, name string) {
@@ -192,6 +193,7 @@ func run(app *o.App, args []string) {
 
 	case "register-key", "register", "link":
 		_ = registerKeyFlagSet.Parse(args[2:])
+		app.DbHandler.SetPath(dbPath)
 		if help {
 			println("Use this command to register a key to your account.")
 			println("Usage: openport register-key <token> [arguments]")
@@ -211,6 +213,7 @@ func run(app *o.App, args []string) {
 		app.RegisterKey(*registerKeyToken, *registerKeyName, socksProxy, server)
 	case "version":
 		_ = versionFlagSet.Parse(args[2:])
+		app.DbHandler.SetPath(dbPath)
 		if help {
 			println("Shows the version of the client executable.")
 			println("Usage: openport version")
@@ -221,6 +224,7 @@ func run(app *o.App, args []string) {
 		fmt.Println(o.VERSION)
 	case "kill":
 		_ = killFlagSet.Parse(args[2:])
+		app.DbHandler.SetPath(dbPath)
 		if help {
 			println("Use this command to kill a session exposing a port.")
 			println("Usage: openport kill <local_port> [arguments]")
@@ -248,6 +252,7 @@ func run(app *o.App, args []string) {
 
 	case "kill-all", "killall":
 		_ = killAllFlagSet.Parse(args[2:])
+		app.DbHandler.SetPath(dbPath)
 		if help {
 			println("Use this command to kill all sessions.")
 			println("Usage: openport kill-all [arguments]")
@@ -260,6 +265,7 @@ func run(app *o.App, args []string) {
 		app.KillAll()
 	case "restart-sessions", "restart", "restartsessions":
 		_ = restartSessionsFlagSet.Parse(args[2:])
+		app.DbHandler.SetPath(dbPath)
 		if help {
 			println("Use this command to restart all sessions that are started with the --restart-on-reboot flag.")
 			println("Usage: openport restart-sessions [arguments]")
@@ -275,6 +281,7 @@ func run(app *o.App, args []string) {
 		}
 	case "list":
 		_ = listFlagSet.Parse(args[2:])
+		app.DbHandler.SetPath(dbPath)
 		if help {
 			println("Use this command to list all sessions.")
 			println("Usage: openport list [arguments]")
@@ -289,6 +296,7 @@ func run(app *o.App, args []string) {
 
 	case "rm":
 		_ = rmFlagSet.Parse(args[2:])
+		app.DbHandler.SetPath(dbPath)
 		if help {
 			println("Use this command to remove a port from your local database. This resets the remote port.")
 			println("Usage: openport rm <local_port> [arguments]")
@@ -318,7 +326,6 @@ func run(app *o.App, args []string) {
 	case "selftest":
 		// This is a test command that is used to test the client.
 		utils.FailOnError(selfTestFlagSet.Parse(args[2:]), "error parsing args for selftest.")
-
 		if help {
 			println("Use this command to run a quick self-test of the application.")
 			println("Usage: openport selftest [arguments]")
@@ -355,6 +362,7 @@ func run(app *o.App, args []string) {
 		var err error
 		if forwardTunnel {
 			_ = defaultFlagSet.Parse(args[2:])
+			app.DbHandler.SetPath(dbPath)
 			if help {
 				println("Use this command to expose the port of your peer on a local port on your machine.")
 				println("See https://openport.readthedocs.io/en/latest/recipes_create_a_forward_tunnel.html for more information.")
@@ -384,6 +392,7 @@ func run(app *o.App, args []string) {
 
 		} else {
 			_ = defaultFlagSet.Parse(args[1:])
+			app.DbHandler.SetPath(dbPath)
 			if help {
 				println("Use this command to expose a local port of your machine to the internet.")
 				println("See https://openport.readthedocs.io/ or https://openport.io for more information.")
