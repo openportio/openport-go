@@ -36,7 +36,7 @@ import (
 	"time"
 )
 
-const VERSION = "2.2.2"
+const VERSION = "2.2.3-beta"
 const USER_CONFIG_FILE = "/etc/openport/users.conf"
 const DEFAULT_SERVER = "https://openport.io"
 
@@ -87,7 +87,7 @@ type App struct {
 	Session              db.Session
 	Stopped              bool
 	StopHooks            *list.List
-	DbHandler            db.DBHandler
+	DbHandler            db.DBHandlerInterface
 	ExitCode             chan int // Blocking channel waiting for the exit code.
 	ExitOnFailureTimeout int
 	Connected            chan bool
@@ -100,6 +100,7 @@ func CreateApp() *App {
 		ExitCode:             make(chan int, 1),
 		StopHooks:            list.New(),
 		Connected:            make(chan bool, 1),
+		DbHandler:            &db.DBHandler{},
 	}
 	app.ConnectedState = &DisconnectedState{app: app}
 	return app
@@ -320,7 +321,7 @@ func (app *App) ListSessions() {
 }
 
 func (app *App) RestartSessions(appPath string, server string) {
-	log.Debugf("Restarting Sessions -> %s %s %s", appPath, server, app.DbHandler.DbPath)
+	log.Debugf("Restarting Sessions -> %s %s %s", appPath, server, app.DbHandler.Path())
 	app.restartSessionsForCurrentUser(appPath, server)
 	app.restartSessionsForAllUsers(appPath)
 }
@@ -366,8 +367,8 @@ func (app *App) restartSessionsForAllUsers(appPath string) {
 }
 
 func (app *App) restartSessionsForCurrentUser(appPath string, server string) {
-	if !utils.FileExists(app.DbHandler.DbPath) {
-		log.Debugf("DB file %s does not exist. Not restarting anything.", app.DbHandler.DbPath)
+	if !utils.FileExists(app.DbHandler.Path()) {
+		log.Debugf("DB file %s does not exist. Not restarting anything.", app.DbHandler.Path())
 		return
 	}
 
@@ -414,8 +415,8 @@ func (app *App) restartSessionsForCurrentUser(appPath string, server string) {
 		if server != DEFAULT_SERVER {
 			restartCommand = append(restartCommand, "--server", server)
 		}
-		if app.DbHandler.DbPath != db.DEFAULT_OPENPORT_DB_PATH {
-			restartCommand = append(restartCommand, "--database", app.DbHandler.DbPath)
+		if app.DbHandler.Path() != db.DEFAULT_OPENPORT_DB_PATH {
+			restartCommand = append(restartCommand, "--database", app.DbHandler.Path())
 		}
 		if !slices.Contains(restartCommand, "--automatic") && !slices.Contains(restartCommand, "-a") {
 			restartCommand = append(restartCommand, "--automatic-restart")
@@ -1006,6 +1007,7 @@ func (app *App) RemoveSession(port int) {
 }
 
 func (app *App) RunSelfTest() {
+	app.DbHandler = &db.DummyDBHandler{}
 	app.InitFiles()
 	go app.CreateTunnel()
 
