@@ -1,7 +1,7 @@
 ARG UBUNTU_VERSION=24.04
 FROM ubuntu:${UBUNTU_VERSION}
 
-RUN apt-get update && apt-get install -y wget iptables telnet socat
+RUN apt-get update && apt-get install -y wget iptables telnet socat openssh-server
 RUN apt-get install -y netcat || true
 RUN apt-get install -y netcat-traditional || true  # 24.04
 

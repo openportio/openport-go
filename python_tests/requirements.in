@@ -1,24 +1,8 @@
-paramiko
 SQLAlchemy
-argparse
-cryptography
-ipaddress
-lockfile
 prettytable
-psutil
-pyOpenSSL
-requests[socks]
-pysocks
-
+requests
 unittest2
-selenium
-nose
 docker
-mock
-unittest-xml-reporting
-tox
-pytest
-junit-xml
 toxiproxy-python
 
 black

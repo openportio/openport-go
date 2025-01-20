@@ -1,5 +1,6 @@
 import dataclasses
 import logging
+import subprocess
 from datetime import datetime, timedelta
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
@@ -12,6 +13,7 @@ from tests.utils.utils import (
     click_open_for_ip_link,
     check_tcp_port_forward,
     get_remote_host_and_port__docker,
+    get_remote_host_and_port__docker_exec_result,
 )
 from tests.utils import osinteraction
 
@@ -19,6 +21,11 @@ TEST_SERVER = "https://test.openport.io"
 # TEST_SERVER = "https://openport.io"
 
 OLD_VERSION_DIR = Path(__file__).parent
+
+LOGGER = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
+SKIP_BUILD = False
 
 
 @dataclasses.dataclass
@@ -40,7 +47,7 @@ class OldVersionsTest(TestCase):
     ]
 
     VERSIONS = [
-        # # Version("1.0.1", "", 60),  # fails, no longer used
+        # Version("1.0.1", "", 60),  # fails, no longer used
         Version("1.0.2", "", 180),  # works
         Version("1.1.0", "", 180),  # works
         Version("1.1.1", "", 180),  # works
@@ -58,7 +65,9 @@ class OldVersionsTest(TestCase):
     def test_old_version(self):
         for version in self.VERSIONS:
             for ubuntu_version in self.UBUNTU_VERSIONS:
-                with self.subTest(version=version.version, ubuntu_version=ubuntu_version):
+                with self.subTest(
+                    version=version.version, ubuntu_version=ubuntu_version
+                ):
                     self.start_and_check_port_forward(version, ubuntu_version)
 
     @classmethod
@@ -67,38 +76,40 @@ class OldVersionsTest(TestCase):
         cls.osinteraction = osinteraction.getInstance()
         cls.docker_client = docker.from_env()
 
-        for version in cls.VERSIONS:
-            for ubuntu_version in cls.UBUNTU_VERSIONS:
-                stream = cls.docker_client.api.build(
-                    dockerfile=f"{OLD_VERSION_DIR}/Dockerfile",
-                    path="..",
-                    tag=f"openport-client:{ubuntu_version}_{version.version}",
-                    buildargs={
-                        "OPENPORT_VERSION": version.version,
-                        "UBUNTU_VERSION": ubuntu_version,
-                    },
-                )
+        if not SKIP_BUILD:
 
-                for line in stream:
-                    print(line)
+            for version in cls.VERSIONS:
+                for ubuntu_version in cls.UBUNTU_VERSIONS:
+                    stream = cls.docker_client.api.build(
+                        dockerfile=f"{OLD_VERSION_DIR}/Dockerfile",
+                        path="..",
+                        tag=f"openport-client:{ubuntu_version}_{version.version}",
+                        buildargs={
+                            "OPENPORT_VERSION": version.version,
+                            "UBUNTU_VERSION": ubuntu_version,
+                        },
+                    )
 
-                # try:
-                #     container = cls.docker_client.containers.run(
-                #         f"openport-client:{ubuntu_version}_{version.version}",
-                #         detach=True,
-                #         command="openport --help",
-                #     )
-                #     logs = container.logs()
-                #     try:
-                #         if isinstance(logs, bytes):
-                #             logs = [logs.decode("utf-8")]
-                #         elif isinstance(logs, str):
-                #             logs = [logs]
-                #         logging.info("\n".join([str(x) for x in logs]))
-                #     except Exception:
-                #         logging.exception(f"Failed to get logs: {logs}")
-                # except Exception as e:
-                #     logging.exception(e)
+                    for line in stream:
+                        print(line)
+
+                    # try:
+                    #     container = cls.docker_client.containers.run(
+                    #         f"openport-client:{ubuntu_version}_{version.version}",
+                    #         detach=True,
+                    #         command="openport --help",
+                    #     )
+                    #     logs = container.logs()
+                    #     try:
+                    #         if isinstance(logs, bytes):
+                    #             logs = [logs.decode("utf-8")]
+                    #         elif isinstance(logs, str):
+                    #             logs = [logs]
+                    #         logging.info("\n".join([str(x) for x in logs]))
+                    #     except Exception:
+                    #         logging.exception(f"Failed to get logs: {logs}")
+                    # except Exception as e:
+                    #     logging.exception(e)
 
     def setUp(self) -> None:
         self.osinteraction = osinteraction.getInstance()
@@ -111,7 +122,6 @@ class OldVersionsTest(TestCase):
             container.stop()
             if not container.attrs["HostConfig"]["AutoRemove"]:
                 container.remove()
-
 
     def test_old_version__port_22_blocked(self):
         for version in self.VERSIONS:
@@ -171,20 +181,21 @@ class OldVersionsTest(TestCase):
 
         pool.map(start_container, ports)
         pool.map(
-            lambda x: self.check_port_forward(x, ports_to_container[x]),
+            lambda x: self.check_port_forward(ports_to_container[x], x),
             ports_to_container.keys(),
         )
 
         self.assertListEqual([], self.errors)
 
-    def start_and_check_port_forward(self, version: Version, ubuntu_version:str):
+    def start_and_check_port_forward(self, version: Version, ubuntu_version: str):
         port = self.osinteraction.get_open_port()
         container = self.start_container(port, version, ubuntu_version)
         try:
-            self.check_port_forward(port, container)
+            self.check_port_forward(container, port)
         finally:
             container.stop()
-            self.containers.remove(container)
+            if container in self.containers:
+                self.containers.remove(container)
 
     def start_container(self, port, version, ubuntu_version):
         self.assertIsNotNone(port)
@@ -199,7 +210,17 @@ class OldVersionsTest(TestCase):
         self.containers.append(container)
         return container
 
-    def check_port_forward(self, port, container):
+    def start_container_as_sleeping(self, version, ubuntu_version):
+        container = self.docker_client.containers.run(
+            f"openport-client:{ubuntu_version}_{version.version}",
+            detach=True,
+            command=f"sleep 180",  # sleep for 3 minutes
+            remove=True,
+        )
+        self.containers.append(container)
+        return container
+
+    def check_port_forward(self, container, port):
         remote_host, remote_port, link = get_remote_host_and_port__docker(
             container, timeout=15
         )
@@ -229,3 +250,105 @@ class OldVersionsTest(TestCase):
         finally:
             container.stop()
             self.containers.remove(container)
+
+    def test_upgrade(self):
+        upgrade_version = "2.2.2"
+
+        for version in self.VERSIONS:
+            for ubuntu_version in self.UBUNTU_VERSIONS:
+                with self.subTest(
+                    version=version.version, ubuntu_version=ubuntu_version
+                ):
+                    try:
+                        container = self.start_container_as_sleeping(
+                            version, ubuntu_version
+                        )
+                        port = 22
+                        self.start_ssh_server(container)
+                        # old version
+                        stream = self.start_openport(container, port)
+                        remote_host, remote_port, link = (
+                            get_remote_host_and_port__docker_exec_result(
+                                stream, timeout=15
+                            )
+                        )
+                        self.assertIsNotNone(link)
+                        click_open_for_ip_link(link)
+
+                        # upgrade
+                        self.upgrade_to_version_via_ssh(
+                            remote_host, remote_port, upgrade_version
+                        )
+                        # todo: check version of running application
+                        self.check_ssh_echo(remote_host, remote_port)
+
+                        self.kill_all_openport_processes(container)
+                        self.run_command(container, f"openport restart-sessions -v")
+                        sleep(5)
+                        # click_open_for_ip_link(link)
+                        self.check_ssh_echo(remote_host, remote_port)
+                    finally:
+                        container.stop()
+                        self.containers.remove(container)
+
+    def start_ssh_server(self, container: docker.models.containers.Container):
+        public_ssh_key_content = Path.home().joinpath(".ssh/id_rsa.pub").read_text()
+        self.run_command(container, "mkdir -p /root/.ssh")
+        self.run_command(
+            container,
+            f"""bash -c "echo '{public_ssh_key_content}' >> /root/.ssh/authorized_keys" """,
+        )
+        self.run_command(container, "chmod 700 /root/.ssh -R")
+        self.run_command(container, "chmod 600 /root/.ssh/authorized_keys")
+        self.run_command(container, "mkdir /var/run/sshd")
+        self.run_command(container, "chmod 0755 /var/run/sshd")
+        exit_code, output = self.run_command(
+            # container, "bash -c '/usr/sbin/sshd -d > /tmp/sshd.log 2>&1 &'"
+            container,
+            "/usr/sbin/sshd",
+        )
+        self.assertEqual(exit_code, 0)
+
+    def start_openport(self, container: docker.models.containers.Container, port: int):
+        """Returns (exit_code, generator)"""
+        return container.exec_run(
+            f"openport {port} --server {TEST_SERVER} --verbose --restart-on-reboot",
+            stream=True,
+        )
+
+    def upgrade_to_version_via_ssh(self, remote_host, remote_port, version: str):
+        def do(command):
+            self.run_ssh_command(remote_host, remote_port, command)
+
+        do(f"wget https://openport.io/static/releases/openport_{version}-1_amd64.deb")
+        do(f"dpkg -i openport_{version}-1_amd64.deb")
+        # do('to killall openport ; openport restart-sessions ')
+
+    def run_ssh_command(self, remote_host, remote_port, command):
+        ssh_command = f"ssh root@{remote_host} -p {remote_port} -o StrictHostKeyChecking=no '{command}'"
+        LOGGER.info(f"Running command: {ssh_command}")
+        output = subprocess.run(ssh_command, shell=True, capture_output=True)
+        LOGGER.info(output)
+        self.assertEqual(output.returncode, 0, output)
+        return output
+
+    def kill_all_openport_processes(self, container):
+        exit_code, output = container.exec_run(
+            """bash -c "ps aux|grep openport|grep -v grep|awk '{print $2}'|xargs kill -9 " """
+        )
+        self.assertEqual(exit_code, 0, output)
+
+    def run_command(self, container, command) -> tuple[int, bytes]:
+        LOGGER.info(f"Running command: {command}")
+        output = container.exec_run(command)
+        LOGGER.info(output)
+        self.assertEqual(output[0], 0, output[1])
+        return output
+
+    def check_ssh_echo(self, remote_host, remote_port):
+        output = self.run_ssh_command(remote_host, remote_port, "echo hello")
+        text = output.stdout
+        self.assertEqual(
+            text,
+            b"hello\n",
+        )

@@ -1,4 +1,8 @@
 import threading
+from signal import SIGINT
+
+import docker.models.containers
+
 from tests.utils.logger_service import get_logger
 
 logger = get_logger(__name__)
@@ -330,7 +334,9 @@ def run_command_with_timeout_return_process(args, timeout_s):
 
 def get_remote_host_and_port_from_output(
     text, http_forward=False, forward_tunnel=False
-):
+) -> tuple[str, int, str]:
+    """returns host, port, link"""
+
     if "CERTIFICATE_VERIFY_FAILED" in text:
         raise Exception("CERTIFICATE_VERIFY_FAILED")
 
@@ -391,8 +397,39 @@ def get_remote_host_and_port__docker(
     output_prefix="",
     http_forward=False,
     forward_tunnel=False,
-):
+) -> tuple[str, int, str]:
+    """returns host, port, link"""
     log_stream = container.logs(stream=True)
+    new_logs = ""
+
+    def read_logs():
+        nonlocal new_logs
+        for line in log_stream:
+            new_logs += line.decode("utf-8")
+
+    t = threading.Thread(target=read_logs)
+    t.start()
+
+    def get_log_method():
+        nonlocal new_logs
+        result = new_logs
+        new_logs = ""
+        return result
+
+    return get_remote_host_and_port__generic(
+        get_log_method, timeout, output_prefix, http_forward, forward_tunnel
+    )
+
+
+def get_remote_host_and_port__docker_exec_result(
+    exec_result: docker.models.containers.ExecResult,
+    timeout=20,
+    output_prefix="",
+    http_forward=False,
+    forward_tunnel=False,
+) -> tuple[str, int, str]:
+    """returns host, port, link"""
+    log_stream = exec_result.output
     new_logs = ""
 
     def read_logs():
@@ -420,7 +457,9 @@ def get_remote_host_and_port__generic(
     output_prefix="",
     http_forward=False,
     forward_tunnel=False,
-):
+) -> tuple[str, int, str]:
+    """returns host, port, link"""
+
     logger.debug("waiting for response")
     start = datetime.datetime.now()
     all_output = ["", ""]
@@ -500,6 +539,10 @@ def kill_all_processes(processes_to_kill):
         try:
             if p.poll() is None:
                 logger.debug("killing process %s" % p.pid)
+                osinteraction.getInstance().kill_pid(p.pid, SIGINT)
+                p.wait(0.5)
+
+            if p.poll() is None:
                 osinteraction.getInstance().kill_pid(p.pid)
             p.wait()
         except Exception as e:
@@ -517,7 +560,8 @@ def click_open_for_ip_link(link, fail_if_link_is_none: bool = True):
     req = Request(link)
     response = run_method_with_timeout(lambda: urlopen(req, timeout=120).read(), 20)
     assert response is not None
-    assert "is now open" in response.decode("utf-8")
+    print(response.decode("utf-8"))
+    assert "is now available" in response.decode("utf-8")
 
 
 servers = {}
