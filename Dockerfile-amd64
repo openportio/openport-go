@@ -1,7 +1,7 @@
 FROM ubuntu:16.04
 MAINTAINER JanDeBleser
 
-ENV LANG C.UTF-8
+ENV LANG=C.UTF-8
 
 RUN apt-get update && apt-get install -y software-properties-common wget gcc curl
 RUN wget https://go.dev/dl/go1.23.1.linux-amd64.tar.gz && \
