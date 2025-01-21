@@ -6,3 +6,4 @@ docker
 toxiproxy-python
 
 black
+pytest
