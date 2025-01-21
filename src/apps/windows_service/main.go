@@ -50,7 +50,7 @@ func (p *program) Start() error {
 
 	go func() {
 		app := o.CreateApp()
-		app.DbHandler.DbPath = db.DEFAULT_OPENPORT_DB_PATH
+		app.DbHandler.SetPath(db.DEFAULT_OPENPORT_DB_PATH)
 		appPath := filepath.Join(filepath.Dir(os.Args[0]), "openportw.exe")
 
 		log.Println("Restarting sessions...")

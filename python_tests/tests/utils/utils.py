@@ -751,6 +751,38 @@ def get_public_key() -> str:
         return f.read()
 
 
+import socket
+import time
+
+
+# from https://gist.github.com/butla/2d9a4c0f35ea47b7452156c96a4e7b12
+def wait_for_port(port: int, host: str = "localhost", timeout: float = 5.0):
+    """Wait until a port starts accepting TCP connections.
+    Args:
+        port: Port number.
+        host: Host address on which the port should exist.
+        timeout: In seconds. How long to wait before raising errors.
+    Raises:
+        TimeoutError: The port isn't accepting connection after time specified in `timeout`.
+    """
+    start_time = time.perf_counter()
+    while True:
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                break
+        except OSError as ex:
+            time.sleep(0.01)
+            if time.perf_counter() - start_time >= timeout:
+                raise TimeoutError(
+                    "Waited too long for the port {} on host {} to start accepting "
+                    "connections.".format(port, host)
+                ) from ex
+
+
+def is_ci():
+    return os.environ.get("IS_CI", "false").lower() == "true"
+
+
 if __name__ == "__main__":
     address, client = get_toxi_mysql()
     # client.add_toxic(type='latency', attributes=dict(latency=5000, jitter=0))

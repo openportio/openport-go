@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import shutil
@@ -18,7 +17,7 @@ from toxiproxy.api import APIConsumer
 from tests.utils.app_tcp_server import send_exit, is_running
 from tests.utils import osinteraction, dbhandler
 from tests.utils.logger_service import get_logger, set_log_level
-from tests.utils.utils import run_method_with_timeout
+from tests.utils.utils import run_method_with_timeout, wait_for_port, is_ci
 from tests.utils.utils import (
     SimpleTcpServer,
     SimpleTcpClient,
@@ -232,7 +231,7 @@ class AppTests(unittest.TestCase):
         test_server = TEST_SERVER.replace(".io", ".xyz")
         port = self.osinteraction.get_open_port()
 
-        p = self.start_openport_process("--local-port", str(port), server=test_server)
+        p = self.start_openport_process(port, server=test_server)
 
         remote_host, remote_port, link = get_remote_host_and_port(
             p, self.osinteraction, timeout=30
@@ -1518,12 +1517,7 @@ class AppTests(unittest.TestCase):
     def test_open_for_ip_option__False(self):
         port = self.osinteraction.get_open_port()
 
-        p = self.start_openport_process(
-            "--local-port",
-            "%s" % port,
-            "--ip-link-protection",
-            "False",
-        )
+        p = self.start_openport_process(port, "--ip-link-protection", "False")
         self.check_application_is_still_alive(p)
         remote_host, remote_port, link = get_remote_host_and_port(p, self.osinteraction)
         self.assertIsNone(link)
@@ -1532,8 +1526,9 @@ class AppTests(unittest.TestCase):
     def test_open_for_ip_option__True(self):
         port = self.osinteraction.get_open_port()
         p = self.start_openport_process(
-            "--local-port",
-            "%s" % port,
+            port,
+            "--request-server",
+            TEST_SERVERS[0],
             "--ip-link-protection",
             "True",
         )
@@ -1603,6 +1598,7 @@ class AppTests(unittest.TestCase):
             self.assertEqual([old_token], request[b"restart_session_token"])
             self.assertEqual([old_remote_port], request[b"request_port"])
             self.assertEqual([b"true"], request[b"automatic_restart"])
+            self.assertEqual([str(local_port).encode()], request[b"local_port"])
         finally:
             http_server.stop()
 
@@ -1633,7 +1629,7 @@ class AppTests(unittest.TestCase):
             "openport-1.3.0.db", 44, b"Me8eHwaze3F6SMS9", b"26541"
         )
         subprocess.Popen(
-            self.openport_exe + self.kill_all,
+            self.openport_exe + [self.kill_all],
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -1644,11 +1640,10 @@ class AppTests(unittest.TestCase):
         self.check_migration(
             "openport-1.3.0_2.db", 54613, b"DRADXUnvHW9m6FuS", b"15070"
         )
-        with self.assertRaises(TimeoutError):
-            self.check_migration__restart_sessions(
-                "openport-1.3.0_2.db", 54613, b"DRADXUnvHW9m6FuS", b"15070"
-            )
-            self.kill_all_in_db(TEST_FILES_PATH / "tmp" / "openport-1.3.0_2.db")
+        self.check_migration__restart_sessions(
+            "openport-1.3.0_2.db", 54613, b"DRADXUnvHW9m6FuS", b"15070"
+        )
+        self.kill_all_in_db(TEST_FILES_PATH / "tmp" / "openport-1.3.0_2.db")
 
     def test_db_migrate_from_1_3_0__3(self):
         if self.ws_options:
@@ -1908,6 +1903,27 @@ for i in range(%s):
             self, remote_host=remote_host, local_port=port, remote_port=remote_port
         )
 
+    def test_socks_proxy(self):
+        port = self.osinteraction.get_open_port()
+        self.ensure_proxies_running()
+        socks_proxy = os.environ.get("SOCKS_PROXY", "0.0.0.0")
+        print("socks_proxy", socks_proxy)
+
+        p = self.start_openport_process(
+            port,
+            "--proxy",
+            f"socks5://{socks_proxy}:1080",
+        )
+        remote_host, remote_port, link = get_remote_host_and_port(p, self.osinteraction)
+        click_open_for_ip_link(link)
+        self.osinteraction.print_output_continuously_threaded(p)
+
+        self.check_application_is_still_alive(p)
+        sleep(1)
+        check_tcp_port_forward(
+            self, remote_host=remote_host, local_port=port, remote_port=remote_port
+        )
+
     def test_exits_on_disconnect_if_connection_timeout_set(self):
         port = self.osinteraction.get_open_port()
         proxy, proxy_client = self.get_proxy()
@@ -1942,19 +1958,18 @@ for i in range(%s):
                 fail_on_error=False,
             )
         )
-
-        sleep(5)
-        self.assertEqual(4, p.returncode, "Expected process to have killed itself.")
+        wait_for_response(lambda: p.returncode == 4, timeout=5)
 
     def get_proxy(self):
         import toxiproxy
 
-        # make sure you've run
-        # docker compose -f docker-compose/toxiproxy.yaml up
+        self.ensure_proxies_running()
+
         APIConsumer.host = TOXI_PROXY_HOST
         server = toxiproxy.Toxiproxy()
         server.destroy_all()
         socks_proxy = os.environ.get("SOCKS_PROXY", get_ip())
+        print("socks_proxy", socks_proxy)
 
         return f"{TOXI_PROXY_HOST}:22220", server.create(
             name="socks_proxy",
@@ -1962,6 +1977,15 @@ for i in range(%s):
             enabled=True,
             listen="0.0.0.0:22220",
         )
+
+    def ensure_proxies_running(self):
+        if not is_ci():
+            compose_file = Path(__file__).parents[1] / "docker-compose/toxiproxy.yaml"
+            command = f"docker compose -f {compose_file} up -d"
+            print(command)
+            print(subprocess.check_output(command.split()))
+            wait_for_port(22220)
+            wait_for_port(1080)
 
     def test_killed_session_not_restarting(self):
         port = self.osinteraction.get_open_port()

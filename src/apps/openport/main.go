@@ -64,8 +64,7 @@ func run(app *o.App, args []string) {
 	}
 
 	addSharedFlags := func(set *flag.FlagSet) {
-		set.IntVar(&port, "port", -1, "The local port you want to expose.")
-		set.IntVar(&port, "local-port", -1, "The local port you want to expose.")
+		set.IntVar(&port, "port", -1, "Sames as 'local-port'")
 		set.StringVar(&remotePort, "remote-port", "-1", "The server and port you want to expose locally. [openport.io:1234]")
 		set.IntVar(&controlPort, "listener-port", -1, "")
 		set.BoolVarP(&restartOnReboot, "restart-on-reboot", "R", false, "Restart this session when 'restart-sessions' is called (on boot for example).")
@@ -85,6 +84,7 @@ func run(app *o.App, args []string) {
 
 	defaultFlagSet := flag.NewFlagSet(args[0], flag.ExitOnError)
 	addSharedFlags(defaultFlagSet)
+	defaultFlagSet.IntVar(&port, "local-port", -1, "The local port you want to expose.")
 
 	addIpLinkProtectionFlag := func(set *flag.FlagSet) {
 		set.StringVar(&useIpLinkProtection, "ip-link-protection", "",
@@ -111,6 +111,7 @@ func run(app *o.App, args []string) {
 
 	forwardTunnelFlagSet := flag.NewFlagSet("forward", flag.ExitOnError)
 	addSharedFlags(forwardTunnelFlagSet)
+	forwardTunnelFlagSet.IntVar(&port, "local-port", -1, "The remote port will be available at localhost:<local-port>")
 
 	// Legacy flags
 	addLegacyFlag(defaultFlagSet, "request-port")
@@ -185,7 +186,7 @@ func run(app *o.App, args []string) {
 	if len(args) <= 1 {
 		myUsage()
 		defaultFlagSet.PrintDefaults()
-		app.ExitCode <- o.EXIT_CODE_USAGE
+		app.Stop(o.EXIT_CODE_USAGE)
 		return
 	}
 
@@ -198,7 +199,7 @@ func run(app *o.App, args []string) {
 			println("Use this command to register a key to your account.")
 			println("Usage: openport register-key <token> [arguments]")
 			registerKeyFlagSet.PrintDefaults()
-			app.ExitCode <- o.EXIT_CODE_HELP
+			app.Stop(o.EXIT_CODE_HELP)
 			return
 		}
 		o.InitLogging(verbose, o.LogPath)
@@ -218,7 +219,7 @@ func run(app *o.App, args []string) {
 			println("Shows the version of the client executable.")
 			println("Usage: openport version")
 			versionFlagSet.PrintDefaults()
-			app.ExitCode <- o.EXIT_CODE_HELP
+			app.Stop(o.EXIT_CODE_HELP)
 			return
 		}
 		fmt.Println(o.VERSION)
@@ -229,7 +230,7 @@ func run(app *o.App, args []string) {
 			println("Use this command to kill a session exposing a port.")
 			println("Usage: openport kill <local_port> [arguments]")
 			killFlagSet.PrintDefaults()
-			app.ExitCode <- o.EXIT_CODE_HELP
+			app.Stop(o.EXIT_CODE_HELP)
 			return
 		}
 		o.InitLogging(verbose, o.LogPath)
@@ -244,7 +245,7 @@ func run(app *o.App, args []string) {
 				if err != nil {
 					log.Warnf("failing: %s %s", tail, err)
 					killFlagSet.PrintDefaults()
-					app.ExitCode <- o.EXIT_CODE_INVALID_ARGUMENT
+					app.Stop(o.EXIT_CODE_INVALID_ARGUMENT)
 				}
 			}
 		}
@@ -257,7 +258,7 @@ func run(app *o.App, args []string) {
 			println("Use this command to kill all sessions.")
 			println("Usage: openport kill-all [arguments]")
 			killAllFlagSet.PrintDefaults()
-			app.ExitCode <- o.EXIT_CODE_HELP
+			app.Stop(o.EXIT_CODE_HELP)
 			return
 		}
 		o.InitLogging(verbose, o.LogPath)
@@ -270,7 +271,7 @@ func run(app *o.App, args []string) {
 			println("Use this command to restart all sessions that are started with the --restart-on-reboot flag.")
 			println("Usage: openport restart-sessions [arguments]")
 			restartSessionsFlagSet.PrintDefaults()
-			app.ExitCode <- o.EXIT_CODE_HELP
+			app.Stop(o.EXIT_CODE_HELP)
 			return
 		}
 		o.InitLogging(verbose, o.LogPath)
@@ -286,13 +287,13 @@ func run(app *o.App, args []string) {
 			println("Use this command to list all sessions.")
 			println("Usage: openport list [arguments]")
 			listFlagSet.PrintDefaults()
-			app.ExitCode <- o.EXIT_CODE_HELP
+			app.Stop(o.EXIT_CODE_HELP)
 			return
 		}
 		o.InitLogging(verbose, o.LogPath)
 		app.InitFiles()
 		app.ListSessions()
-		app.ExitCode <- o.EXIT_CODE_LIST
+		app.Stop(o.EXIT_CODE_LIST)
 
 	case "rm":
 		_ = rmFlagSet.Parse(args[2:])
@@ -301,7 +302,7 @@ func run(app *o.App, args []string) {
 			println("Use this command to remove a port from your local database. This resets the remote port.")
 			println("Usage: openport rm <local_port> [arguments]")
 			rmFlagSet.PrintDefaults()
-			app.ExitCode <- o.EXIT_CODE_HELP
+			app.Stop(o.EXIT_CODE_HELP)
 			return
 		}
 		o.InitLogging(verbose, o.LogPath)
@@ -316,12 +317,12 @@ func run(app *o.App, args []string) {
 				if err != nil {
 					log.Warnf("failing: %s %s", tail, err)
 					killFlagSet.PrintDefaults()
-					app.ExitCode <- o.EXIT_CODE_INVALID_ARGUMENT
+					app.Stop(o.EXIT_CODE_INVALID_ARGUMENT)
 				}
 			}
 		}
 		app.RemoveSession(port)
-		app.ExitCode <- o.EXIT_CODE_RM
+		app.Stop(o.EXIT_CODE_RM)
 
 	case "selftest":
 		// This is a test command that is used to test the client.
@@ -330,7 +331,7 @@ func run(app *o.App, args []string) {
 			println("Use this command to run a quick self-test of the application.")
 			println("Usage: openport selftest [arguments]")
 			selfTestFlagSet.PrintDefaults()
-			app.ExitCode <- o.EXIT_CODE_HELP
+			app.Stop(o.EXIT_CODE_HELP)
 			return
 		}
 
@@ -368,12 +369,12 @@ func run(app *o.App, args []string) {
 				println("See https://openport.readthedocs.io/en/latest/recipes_create_a_forward_tunnel.html for more information.")
 				println("Usage: openport forward --remote-port <server:server_port> [arguments]")
 				forwardTunnelFlagSet.PrintDefaults()
-				app.ExitCode <- o.EXIT_CODE_HELP
+				app.Stop(o.EXIT_CODE_HELP)
 				return
 			}
 			if useWS {
 				log.Warn("Websockets are not supported for forward tunnels (yet). Let us know if you need this feature.")
-				app.ExitCode <- o.EXIT_CODE_INVALID_ARGUMENT
+				app.Stop(o.EXIT_CODE_INVALID_ARGUMENT)
 				return
 			}
 
@@ -411,7 +412,7 @@ func run(app *o.App, args []string) {
 				println("")
 				println("Default usage: openport <local_port> [arguments]")
 				defaultFlagSet.PrintDefaults()
-				app.ExitCode <- o.EXIT_CODE_HELP
+				app.Stop(o.EXIT_CODE_HELP)
 				return
 			}
 
@@ -430,7 +431,7 @@ func run(app *o.App, args []string) {
 					log.Error("Missing a local port or command.")
 					myUsage()
 					defaultFlagSet.PrintDefaults()
-					app.ExitCode <- o.EXIT_CODE_INVALID_ARGUMENT
+					app.Stop(o.EXIT_CODE_INVALID_ARGUMENT)
 				}
 			} else {
 				var err error
@@ -439,7 +440,7 @@ func run(app *o.App, args []string) {
 					log.Warnf("Unknown command: %s", tail)
 					myUsage()
 					defaultFlagSet.PrintDefaults()
-					app.ExitCode <- o.EXIT_CODE_INVALID_ARGUMENT
+					app.Stop(o.EXIT_CODE_INVALID_ARGUMENT)
 				}
 			}
 		}
@@ -477,7 +478,7 @@ func run(app *o.App, args []string) {
 		app.InitFiles()
 		app.CreateTunnel()
 	}
-	app.ExitCode <- 0
+	app.Stop(0)
 }
 
 func myUsage() {

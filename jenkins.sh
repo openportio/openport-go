@@ -21,6 +21,8 @@ docker compose $COMPOSE_ARGS down --remove-orphans
 # Python tests
 ./docker_compile.sh
 cd python_tests || exit
-COMPOSE_ARGS="-f docker-compose/docker-compose-test.yaml -p $PROJECT_NAME"
+yq 'del(.services[].ports)' docker-compose/docker-compose-test.yaml -y > docker-compose/docker-compose-test-no-ports.yaml
+COMPOSE_ARGS="-f docker-compose/docker-compose-test-no-ports.yaml -p $PROJECT_NAME"
+
 docker compose $COMPOSE_ARGS up --build --abort-on-container-exit
 docker compose $COMPOSE_ARGS down --remove-orphans

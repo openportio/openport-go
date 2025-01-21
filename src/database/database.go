@@ -218,6 +218,9 @@ func (dbHandler *DBHandler) EnrichSessionWithHistory(session *Session) Session {
 				session.SessionToken = dbSession.SessionToken
 				session.RemotePort = dbSession.RemotePort
 				session.ID = dbSession.ID
+				if dbSession.SshServer != "" {
+					session.SshServer = dbSession.SshServer
+				}
 			}
 		}
 		return dbSession

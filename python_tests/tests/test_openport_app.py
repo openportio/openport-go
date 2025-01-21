@@ -5,8 +5,8 @@ import signal
 import threading
 from time import sleep
 from unittest import skip
+from unittest.mock import patch
 
-from mock import patch
 from requests import ConnectionError
 import unittest
 

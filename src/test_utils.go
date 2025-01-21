@@ -48,6 +48,7 @@ var httpClient = http.Client{
 }
 
 func ClickLink(t *testing.T, link string) {
+	log.Infof("Clicking link %s", link)
 	resp, err := httpClient.Get(link)
 	FailIfError(t, err)
 
@@ -55,7 +56,8 @@ func ClickLink(t *testing.T, link string) {
 
 	responseBody, err := io.ReadAll(resp.Body)
 	FailIfError(t, err)
-	assert.True(t, strings.Contains(string(responseBody), "Port is now open"))
+	log.Debugf(string(responseBody))
+	assert.True(t, strings.Contains(string(responseBody), "is now available from your IP"))
 }
 
 func CheckTcpForward(t *testing.T, localPort int, server string, remotePort int) {
@@ -148,4 +150,30 @@ func DefaultEnv(key string, deflt string) string {
 		result = os.Getenv(key)
 	}
 	return result
+}
+
+func CopyFile(src, dst string) error {
+	sourceFileStat, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	if !sourceFileStat.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", src)
+	}
+
+	source, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	destination, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destination.Close()
+
+	_, err = io.Copy(destination, source)
+	return err
 }

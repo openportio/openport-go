@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const TEST_SERVER = "https://test2.openport.io"
+const TEST_SERVER = "https://test.openport.io"
 
 var OPENPORT_EXE = openport.DefaultEnv("OPENPORT_EXE", "/home/jan/workspace/openport-go-client/openport-amd64")
 
@@ -183,7 +183,7 @@ func TestSaveForwardTunnel(t *testing.T) {
 		}
 	}
 	openport.AssertEqual(t, "ok", openport.TimeoutFunction(t, waitForActiveSessions, 20*time.Second))
-	time.Sleep(20000 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	openport.CheckTcpForward(t, port, "127.0.0.1", forwardPort)
 }

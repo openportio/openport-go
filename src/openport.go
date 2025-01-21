@@ -212,10 +212,10 @@ func (app *App) StartDaemon(args []string) {
 	err := cmd.Start()
 	if err != nil {
 		log.Fatal(err)
-		app.ExitCode <- EXIT_CODE_DAEMONIZED_ERROR
+		app.Stop(EXIT_CODE_DAEMONIZED_ERROR)
 	} else {
 		log.Info("Process started in background")
-		app.ExitCode <- EXIT_CODE_DAEMONIZED_OK
+		app.Stop(EXIT_CODE_DAEMONIZED_OK)
 	}
 }
 
@@ -261,10 +261,10 @@ func (app *App) RegisterKey(keyBindingToken string, name string, proxy string, s
 	}
 	if response.Status != "ok" {
 		log.Fatalf("Could not register key: %s", response.Error)
-		app.ExitCode <- EXIT_CODE_KEY_REGISTERED_FAILED
+		app.Stop(EXIT_CODE_KEY_REGISTERED_FAILED)
 	} else {
 		log.Info("key successfully registered")
-		app.ExitCode <- EXIT_CODE_KEY_REGISTERED_OK
+		app.Stop(EXIT_CODE_KEY_REGISTERED_OK)
 	}
 }
 
@@ -354,6 +354,7 @@ func (app *App) restartSessionsForAllUsers(appPath string) {
 				continue
 			}
 			if username != "" {
+				// Running with -H is needed because ubuntu < 19.10 did not set the HOME variable to the target user's home
 				command := []string{"-u", username, "-H", appPath, "restart-sessions"}
 				log.Debugf("Running command sudo %s", command)
 				cmd := exec.Command("sudo", command...)
@@ -364,6 +365,66 @@ func (app *App) restartSessionsForAllUsers(appPath string) {
 			}
 		}
 	}
+}
+
+func (app *App) getRestartCommandBasedOnSessionContent(session db.Session, server string) []string {
+	var restartCommand []string
+	if session.LocalPort != 0 {
+		restartCommand = append(restartCommand, fmt.Sprintf("%d", session.LocalPort))
+	}
+
+	return restartCommand
+}
+
+func (app *App) getRestartCommand(session db.Session, server string) []string {
+	restartCommand := strings.Split(session.RestartCommand, " ")
+	if (len(restartCommand) > 1 && restartCommand[1][0] != '-' && restartCommand[0] != "--port") ||
+		strings.Contains(restartCommand[0], "\n") ||
+		restartCommand[0][0] == 0x80 {
+		log.Debugf("Migrating from older version: %s", session.RestartCommand)
+		// Python pickle
+		buf := bytes.NewBufferString(session.RestartCommand)
+		dec := ogrek.NewDecoder(buf)
+		unpickled, err := dec.Decode()
+		if err != nil {
+			log.Error(err)
+			restartCommand = app.getRestartCommandBasedOnSessionContent(session, server)
+		} else {
+			log.Debugf("this is unpickled : <%s>", unpickled)
+			restartCommand = []string{}
+			unpickledInterfaces, castWasOk := unpickled.([]interface{})
+			if castWasOk {
+				for _, part := range unpickledInterfaces {
+					restartCommand = append(restartCommand, part.(string))
+				}
+			} else {
+				unpickledString := unpickled.(string)
+				if unpickledString == "" {
+					restartCommand = app.getRestartCommandBasedOnSessionContent(session, server)
+				} else {
+					restartCommand = []string{unpickledString}
+				}
+			}
+			if strings.Contains(restartCommand[0], "openport") {
+				restartCommand = restartCommand[1:]
+			}
+		}
+	}
+	if len(restartCommand) == 0 {
+		log.Warnf("Session %d will not be restarted", session.LocalPort)
+	}
+
+	if server != DEFAULT_SERVER {
+		restartCommand = append(restartCommand, "--server", server)
+	}
+	if app.DbHandler.Path() != db.DEFAULT_OPENPORT_DB_PATH {
+		restartCommand = append(restartCommand, "--database", app.DbHandler.Path())
+	}
+	if !slices.Contains(restartCommand, "--automatic") && !slices.Contains(restartCommand, "-a") {
+		restartCommand = append(restartCommand, "--automatic-restart")
+	}
+	return restartCommand
+
 }
 
 func (app *App) restartSessionsForCurrentUser(appPath string, server string) {
@@ -379,47 +440,10 @@ func (app *App) restartSessionsForCurrentUser(appPath string, server string) {
 	}
 	for _, session := range sessions {
 		log.Debug("Restarting session: ", session.LocalPort)
-		restartCommand := strings.Split(session.RestartCommand, " ")
-		if (len(restartCommand) > 1 && restartCommand[1][0] != '-' && restartCommand[0] != "--port") ||
-			strings.Contains(restartCommand[0], "\n") ||
-			restartCommand[0][0] == 0x80 {
-			log.Debugf("Migrating from older version: %s", session.RestartCommand)
-			// Python pickle
-			buf := bytes.NewBufferString(session.RestartCommand)
-			dec := ogrek.NewDecoder(buf)
-			unpickled, err := dec.Decode()
-			if err != nil {
-				log.Error(err)
-				log.Warn("Session will not be restarted")
-				continue
-			}
-			log.Debugf("this is unpickled : <%s>", unpickled)
-			restartCommand = []string{}
-			unpickledInterfaces, castWasOk := unpickled.([]interface{})
-			if castWasOk {
-				for _, part := range unpickledInterfaces {
-					restartCommand = append(restartCommand, part.(string))
-				}
-			} else {
-				unpickledString := unpickled.(string)
-				if unpickledString == "" {
-					continue
-				}
-				restartCommand = []string{unpickledString}
-			}
-			if strings.Contains(restartCommand[0], "openport") {
-				restartCommand = restartCommand[1:]
-			}
-		}
-
-		if server != DEFAULT_SERVER {
-			restartCommand = append(restartCommand, "--server", server)
-		}
-		if app.DbHandler.Path() != db.DEFAULT_OPENPORT_DB_PATH {
-			restartCommand = append(restartCommand, "--database", app.DbHandler.Path())
-		}
-		if !slices.Contains(restartCommand, "--automatic") && !slices.Contains(restartCommand, "-a") {
-			restartCommand = append(restartCommand, "--automatic-restart")
+		restartCommand := app.getRestartCommand(session, server)
+		if len(restartCommand) == 0 {
+			log.Warnf("Session %d will not be restarted", session.LocalPort)
+			continue
 		}
 
 		log.Infof("Running command %s with args %s", appPath, restartCommand)
@@ -541,7 +565,11 @@ func (app *App) CreateTunnel() {
 	}
 	app.DbHandler.InitDB()
 	dbSession := app.DbHandler.EnrichSessionWithHistory(&app.Session)
-	if dbSession.ID > 0 && SessionIsLive(dbSession) {
+	oldSession, err := app.DbHandler.GetSession(app.Session.LocalPort)
+	if err != nil {
+		log.Fatalf("error fetching session: %s", err)
+	}
+	if oldSession.ID > 0 && SessionIsLive(oldSession) {
 		log.Fatalf("Port forward already running for port %d with PID %d",
 			dbSession.LocalPort, dbSession.Pid)
 	}
@@ -693,7 +721,7 @@ func (app *App) RequestPortForward(session *db.Session, publicKey []byte) (PortR
 		if response.FatalError {
 			log.Infof("Stopping session on request of server: %s", response.Error)
 			app.DbHandler.SetInactive(session)
-			app.ExitCode <- EXIT_CODE_FATAL_SESSION_ERROR
+			app.Stop(EXIT_CODE_FATAL_SESSION_ERROR)
 		}
 		return PortResponse{}, ServerResponseError{response.Error}
 	}
@@ -957,7 +985,7 @@ func (state *DisconnectedState) DoState() {
 	select {
 	case <-timeoutChannel:
 		log.Errorf("Not Connected for %d seconds, exiting.", state.app.ExitOnFailureTimeout)
-		state.app.ExitCode <- EXIT_CODE_NO_CONNECTION
+		state.app.Stop(EXIT_CODE_NO_CONNECTION)
 	case connected := <-state.app.Connected:
 		log.Debugf("disconnected state: got Connected:  %t", connected)
 		state.app.Session.Connected = connected
