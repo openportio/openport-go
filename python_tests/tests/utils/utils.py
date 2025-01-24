@@ -465,6 +465,10 @@ def get_remote_host_and_port__generic(
     all_output = ["", ""]
     while start + datetime.timedelta(seconds=timeout) > datetime.datetime.now():
         output = get_log_method()
+        if "Now forwarding " in output and "http" not in output:
+            sleep(0.1)
+            output += get_log_method()
+
         all_output += output
         if output:
             logger.info("%s - <<<<<%s>>>>>" % (output_prefix, output))
@@ -597,7 +601,7 @@ def check_tcp_port_forward(
         cl.close()
         print("local server ok")
 
-        sleep(3)
+        # sleep(3)
 
         # Connect to remote service
         print(f"Connecting to {remote_host}:{remote_port}")

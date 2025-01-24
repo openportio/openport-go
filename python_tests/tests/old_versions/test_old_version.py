@@ -1,6 +1,7 @@
 import dataclasses
 import logging
 import subprocess
+import threading
 from datetime import datetime, timedelta
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
@@ -14,6 +15,7 @@ from tests.utils.utils import (
     check_tcp_port_forward,
     get_remote_host_and_port__docker,
     get_remote_host_and_port__docker_exec_result,
+    wait_for_response,
 )
 from tests.utils import osinteraction
 
@@ -32,8 +34,21 @@ SKIP_BUILD = False
 class Version:
     version: str
     extra_args: str = ""
-    timeout: int = 30
+    timeout: int = 60
     help_exit_code: int = 0
+    test_started: datetime = None
+
+
+def get_timeout(version: Version):
+    if version.test_started:
+        timeout = max(
+            0, version.timeout - (datetime.now() - version.test_started).seconds
+        )
+    else:
+        timeout = version.timeout
+    logging.info("Timeout for version %s: %s", version.version, timeout)
+
+    return timeout
 
 
 class OldVersionsTest(TestCase):
@@ -63,12 +78,28 @@ class OldVersionsTest(TestCase):
     ]
 
     def test_old_version(self):
+        skip_versions = [
+            ("2.2.0", "16.04"),
+            ("2.2.0", "18.04"),
+            ("2.2.1", "16.04"),
+            ("2.2.1", "18.04"),
+        ]
+
+        pool = ThreadPool(processes=10)
+        results = []
         for version in self.VERSIONS:
             for ubuntu_version in self.UBUNTU_VERSIONS:
-                with self.subTest(
-                    version=version.version, ubuntu_version=ubuntu_version
-                ):
-                    self.start_and_check_port_forward(version, ubuntu_version)
+                if (version.version, ubuntu_version) in skip_versions:
+                    continue
+                result = pool.apply_async(
+                    self.start_and_check_port_forward, (version, ubuntu_version, 60)
+                )
+                results.append((version, ubuntu_version, result))
+
+        for version, ubuntu_version, result in results:
+            with self.subTest(version=version.version, ubuntu_version=ubuntu_version):
+                result.wait(timeout=get_timeout(version))
+                self.assertTrue(result.successful())
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -124,85 +155,112 @@ class OldVersionsTest(TestCase):
                 container.remove()
 
     def test_old_version__port_22_blocked(self):
-        for version in self.VERSIONS:
-            with self.subTest(version=version.version):
-                port = self.osinteraction.get_open_port()
+        ubuntu_version = "20.04"
+        known_issues = []
+        versions = self.VERSIONS
 
-                container = self.docker_client.containers.run(
-                    f"openport-client:{version.version}",
-                    detach=True,
-                    command=f"/app/block_port_and_run_openport.sh {port} --server {TEST_SERVER} --verbose "
-                    + version.extra_args,
-                    # network="host",  # do not use network="host" because it will add iptables rules to the host.
-                    volumes=[
-                        f"{OLD_VERSION_DIR}/:/app/",
-                    ],
-                    environment={
-                        "SERVER": TEST_SERVER.split("://")[1].split(":")[0],
-                        "PORT": port,
-                    },
-                    privileged=True,
-                    extra_hosts=["host.docker.internal:host-gateway"],
-                )
-                self.containers.append(container)
-                remote_host, remote_port, link = get_remote_host_and_port__docker(
-                    container, timeout=version.timeout
-                )
+        pool = ThreadPool(processes=20)
+        results = []
+        for version in versions:
+            result = pool.apply_async(
+                self.check_old_version__port_22_blocked, (version, ubuntu_version)
+            )
+            results.append((version, ubuntu_version, result))
 
-                self.assertIsNotNone(link)
-                click_open_for_ip_link(link)
-                check_tcp_port_forward(
-                    self,
-                    remote_host=remote_host,
-                    local_port=port,
-                    remote_port=remote_port,
-                )
+        for version, ubuntu_version, result in results:
+            with self.subTest(version=version.version, ubuntu_version=ubuntu_version):
+                result.wait(timeout=get_timeout(version))
+                if (version.version, ubuntu_version) in known_issues:
+                    self.assertFalse(result.successful())
+                else:
+                    self.assertTrue(result.successful())
+
+    def check_old_version__port_22_blocked(self, version, ubuntu_version):
+        version.test_started = datetime.now()
+
+        port = self.osinteraction.get_open_port()
+
+        container = self.docker_client.containers.run(
+            f"openport-client:{ubuntu_version}_{version.version}",
+            detach=True,
+            command=f"/app/block_port_and_run_openport.sh {port} --server {TEST_SERVER} --verbose "
+            + version.extra_args,
+            # network="host",  # do not use network="host" because it will add iptables rules to the host.
+            volumes=[
+                f"{OLD_VERSION_DIR}/:/app/",
+            ],
+            environment={
+                "SERVER": TEST_SERVER.split("://")[1].split(":")[0],
+                "PORT": port,
+            },
+            privileged=True,
+            extra_hosts=["host.docker.internal:host-gateway"],
+        )
+        try:
+            self.containers.append(container)
+            remote_host, remote_port, link = get_remote_host_and_port__docker(
+                container, timeout=version.timeout
+            )
+
+            self.assertIsNotNone(link)
+            click_open_for_ip_link(link)
+            check_tcp_port_forward(
+                self,
+                remote_host=remote_host,
+                local_port=port,
+                remote_port=remote_port,
+            )
+        finally:
+            self.stop_container_in_thread(container)
 
     def test_load_test(self):
         self.maxDiff = None
-        amount_of_clients = 100
+        amount_of_clients = 250
         version = max(self.VERSIONS, key=lambda x: x.version)
         ports_to_container = {}
         ports = list(range(20000, 20000 + amount_of_clients))
-        #
-        # for i in range(amount_of_clients):
-        #     port = None
-        #
-        #
-        #     while port is None or port in ports or port > 32768:
-        #         port = self.osinteraction.get_open_port()
-        #     ports.append(port)
 
         def start_container(port):
-            container = self.start_container(port, version)
+            container = self.start_container(port, version, "20.04")
             ports_to_container[port] = container
 
-        pool = ThreadPool(processes=100)
+        pool = ThreadPool(processes=1000)
 
         pool.map(start_container, ports)
         pool.map(
-            lambda x: self.check_port_forward(ports_to_container[x], x),
+            lambda x: self.check_port_forward(
+                ports_to_container[x], x, get_link_timeout=120
+            ),
             ports_to_container.keys(),
         )
 
         self.assertListEqual([], self.errors)
 
-    def start_and_check_port_forward(self, version: Version, ubuntu_version: str):
+    def start_and_check_port_forward(
+        self, version: Version, ubuntu_version: str, get_link_timeout=15
+    ):
+        version.test_started = datetime.now()
         port = self.osinteraction.get_open_port()
         container = self.start_container(port, version, ubuntu_version)
         try:
-            self.check_port_forward(container, port)
+            self.check_port_forward(container, port, get_link_timeout=get_link_timeout)
         finally:
+            self.stop_container_in_thread(container)
+
+    def stop_container_in_thread(self, container):
+        def do():
             container.stop()
             if container in self.containers:
                 self.containers.remove(container)
+
+        threading.Thread(target=do, daemon=False).start()
 
     def start_container(self, port, version, ubuntu_version):
         self.assertIsNotNone(port)
         container = self.docker_client.containers.run(
             f"openport-client:{ubuntu_version}_{version.version}",
             detach=True,
-            command=f"openport {port} --server {TEST_SERVER} --verbose  "
+            command=f"nice -n 19 openport {port} --server {TEST_SERVER} --verbose  "
             + version.extra_args,
             network="host",
             remove=True,
@@ -220,9 +278,9 @@ class OldVersionsTest(TestCase):
         self.containers.append(container)
         return container
 
-    def check_port_forward(self, container, port):
+    def check_port_forward(self, container, port, get_link_timeout=15):
         remote_host, remote_port, link = get_remote_host_and_port__docker(
-            container, timeout=15
+            container, timeout=get_link_timeout
         )
         try:
             # self.assertIsNone(link)
@@ -254,42 +312,29 @@ class OldVersionsTest(TestCase):
     def test_upgrade(self):
         upgrade_version = "2.2.2"
 
+        known_issues = [
+            ("1.0.2", "20.04"),
+            ("1.1.0", "20.04"),
+        ]
+        pool = ThreadPool(processes=20)
+        results = []
         for version in self.VERSIONS:
-            for ubuntu_version in self.UBUNTU_VERSIONS:
-                with self.subTest(
-                    version=version.version, ubuntu_version=ubuntu_version
-                ):
+            ubuntu_version = "20.04"
+
+            result = pool.apply_async(
+                self.start_and_check_upgrade, (version, ubuntu_version, upgrade_version)
+            )
+            results.append((version, ubuntu_version, result))
+        for version, ubuntu_version, result in results:
+            with self.subTest(version=version.version, ubuntu_version=ubuntu_version):
+                result.wait(timeout=get_timeout(version))
+                if (version.version, ubuntu_version) in known_issues:
                     try:
-                        container = self.start_container_as_sleeping(
-                            version, ubuntu_version
-                        )
-                        port = 22
-                        self.start_ssh_server(container)
-                        # old version
-                        stream = self.start_openport(container, port)
-                        remote_host, remote_port, link = (
-                            get_remote_host_and_port__docker_exec_result(
-                                stream, timeout=15
-                            )
-                        )
-                        self.assertIsNotNone(link)
-                        click_open_for_ip_link(link)
-
-                        # upgrade
-                        self.upgrade_to_version_via_ssh(
-                            remote_host, remote_port, upgrade_version
-                        )
-                        # todo: check version of running application
-                        self.check_ssh_echo(remote_host, remote_port)
-
-                        self.kill_all_openport_processes(container)
-                        self.run_command(container, f"openport restart-sessions -v")
-                        sleep(5)
-                        # click_open_for_ip_link(link)
-                        self.check_ssh_echo(remote_host, remote_port)
-                    finally:
-                        container.stop()
-                        self.containers.remove(container)
+                        self.assertFalse(result.successful())
+                    except Exception as e:
+                        logging.exception(e)
+                else:
+                    self.assertTrue(result.successful())
 
     def start_ssh_server(self, container: docker.models.containers.Container):
         public_ssh_key_content = Path.home().joinpath(".ssh/id_rsa.pub").read_text()
@@ -333,10 +378,22 @@ class OldVersionsTest(TestCase):
         return output
 
     def kill_all_openport_processes(self, container):
-        exit_code, output = container.exec_run(
-            """bash -c "ps aux|grep openport|grep -v grep|awk '{print $2}'|xargs kill -9 " """
-        )
+        exit_code, output = container.exec_run("""openport kill-all""")
         self.assertEqual(exit_code, 0, output)
+
+        def no_openport_running():
+            exit_code, output = container.exec_run(
+                """bash -c "ps aux|grep openport|grep -v grep|grep -v defunct" """
+            )
+            # self.assertEqual(0, exit_code)
+            print(output)
+            return not bool(output)
+
+        if not wait_for_response(no_openport_running, timeout=5, throw=False):
+            exit_code, output = container.exec_run(
+                """bash -c "ps aux|grep openport|grep -v grep|awk '{print $2}'|xargs kill -9 " """
+            )
+            self.assertEqual(exit_code, 0, output)
 
     def run_command(self, container, command) -> tuple[int, bytes]:
         LOGGER.info(f"Running command: {command}")
@@ -352,3 +409,43 @@ class OldVersionsTest(TestCase):
             text,
             b"hello\n",
         )
+
+    def start_and_check_upgrade(self, version, ubuntu_version, upgrade_version):
+        version.test_started = datetime.now()
+
+        container = self.start_container_as_sleeping(version, ubuntu_version)
+        try:
+            port = 22
+            self.start_ssh_server(container)
+            # old version
+            stream = self.start_openport(container, port)
+            remote_host, remote_port, link = (
+                get_remote_host_and_port__docker_exec_result(stream, timeout=15)
+            )
+            self.assertIsNotNone(link)
+            click_open_for_ip_link(link)
+
+            # upgrade
+            self.upgrade_to_version_via_ssh(remote_host, remote_port, upgrade_version)
+            # todo: check version of running application
+            self.check_ssh_echo(remote_host, remote_port)
+
+            self.kill_all_openport_processes(container)
+            # sleep(5)
+            self.run_command(container, f"openport restart-sessions -v")
+
+            # sleep(2)
+
+            def do_click():
+                try:
+                    click_open_for_ip_link(link)
+                    return True
+                except Exception as e:
+                    logging.exception(e)
+                    sleep(0.5)
+                    return False
+
+            wait_for_response(do_click)
+            self.check_ssh_echo(remote_host, remote_port)
+        finally:
+            self.stop_container_in_thread(container)

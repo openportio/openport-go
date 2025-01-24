@@ -1937,7 +1937,7 @@ for i in range(%s):
             "--keep-alive",
             "1",
             "--exit-on-failure-timeout",
-            "5",
+            "3",
             "--restart-on-reboot",
         )
         remote_host, remote_port, link = get_remote_host_and_port(p, self.osinteraction)
