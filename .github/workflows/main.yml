@@ -23,4 +23,5 @@ jobs:
       with:
         file: docker-compose.yaml
         service: client_tests
-        command: sh -c "gotestsum --format standard-verbose --junitfile /apps/go/test-results/report.xml apps/openport/*.go"
+        entrypoint: /bin/sh
+        command: -c "gotestsum --format standard-verbose --junitfile /apps/go/test-results/report.xml apps/openport/*.go"
