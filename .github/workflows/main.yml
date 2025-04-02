@@ -17,4 +17,6 @@ jobs:
       uses: docker/setup-compose-action@v1.2.0
 
     - name: Docker compose tests run
-      run: ./jenkins.sh
+      run: docker compose up --build --abort-on-container-exit
+    - name: cleanup
+      run: docker compose down --remove-orphans
