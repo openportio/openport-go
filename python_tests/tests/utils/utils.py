@@ -741,7 +741,7 @@ def get_toxi_mysql():
     import toxiproxy
 
     # make sure you've run
-    # docker-compose -f docker-compose/toxiproxy.yaml up
+    # docker compose -f docker-compose/toxiproxy.yaml up
     server = toxiproxy.Toxiproxy()
     server.destroy_all()
     return "127.0.0.1:33306", server.create(
