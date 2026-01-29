@@ -1,0 +1,22 @@
+name: Docker Compose
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Docker Setup Compose
+      uses: docker/setup-compose-action@v1.2.0
+
+    - name: Docker compose tests run
+      run: docker compose up --build --abort-on-container-exit
+    - name: cleanup
+      run: docker compose down --remove-orphans
