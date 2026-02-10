@@ -51,7 +51,7 @@ func (s Session) PrintMessage(message string) {
 	} else {
 		log.Infof("Now forwarding remote port %s:%d to localhost:%d", s.SshServer, s.RemotePort, s.LocalPort)
 	}
-	log.Infof(message)
+	log.Info(message)
 }
 
 type DBHandlerInterface interface {
@@ -92,7 +92,7 @@ func (dbHandler *DBHandler) InitDB() {
 	// Migrate the schema
 	db.AutoMigrate(&Session{})
 	if !existed {
-		log.Debugf("db created")
+		log.Debug("db created")
 	}
 }
 
