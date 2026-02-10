@@ -28,5 +28,7 @@ services:
 
   proxy-no-password:
     image: serjs/go-socks5-proxy
+    environment:
+      - REQUIRE_AUTH=false
     ports:
       - 1080:1080

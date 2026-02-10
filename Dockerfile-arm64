@@ -2,6 +2,11 @@ FROM debian:buster
 # Using the oldest version of debian that supplies the arm64 architecture. Ubuntu 16.04 does not support armhf.
 MAINTAINER JanDeBleser
 
+# buster is out of LFS, we need to use the archive repos
+RUN sed -i 's|deb.debian.org|archive.debian.org|g' /etc/apt/sources.list
+RUN sed -i 's|security.debian.org|archive.debian.org|g' /etc/apt/sources.list
+RUN sed -i '/buster-updates/d' /etc/apt/sources.list
+
 RUN apt-get update && apt-get install -y software-properties-common wget gcc curl
 RUN wget https://go.dev/dl/go1.23.1.linux-amd64.tar.gz && \
     rm -rf /usr/local/go &&  \
