@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type WSClient struct {
@@ -49,8 +50,9 @@ func (client *WSClient) ForwardPort(localPort int) {
 
 	// read connections from server
 	channels := make(map[string]*Channel)
+	writeMu := &sync.Mutex{}
 	for {
-		channel, msg, chop, err := ChannelFromServerMessage(client.wsConn)
+		channel, msg, chop, err := ChannelFromServerMessage(client.wsConn, writeMu)
 		if err != nil {
 			if err != io.EOF && !strings.Contains(err.Error(), "use of closed network connection") {
 				log.Error("Could not get channel from websocket: ", err)
