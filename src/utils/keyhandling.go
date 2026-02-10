@@ -84,7 +84,7 @@ func ReadKeys() ([]byte, ssh.Signer, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	log.Debugf(string(publicKey))
+	log.Debug(string(publicKey))
 	return publicKey, key, nil
 }
 
@@ -117,11 +117,11 @@ func EnsureKeysExist() ([]byte, ssh.Signer, error) {
 
 			block, rest := pem.Decode(buf)
 			if len(rest) > 0 {
-				log.Debugf("Extra data included in key, creating new keys.")
+				log.Debug("Extra data included in key, creating new keys.")
 				return CreateKeys()
 			} else {
 				if x509.IsEncryptedPEMBlock(block) {
-					log.Debugf("Encrypted key, creating new keys.")
+					log.Debug("Encrypted key, creating new keys.")
 					return CreateKeys()
 				} else {
 					log.Debugf("Usable keys in %s, copying to %s", SSH_PUBLIC_KEY_PATH, OPENPORT_PUBLIC_KEY_PATH)

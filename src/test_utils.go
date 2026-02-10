@@ -56,7 +56,7 @@ func ClickLink(t *testing.T, link string) {
 
 	responseBody, err := io.ReadAll(resp.Body)
 	FailIfError(t, err)
-	log.Debugf(string(responseBody))
+	log.Debug(string(responseBody))
 	assert.True(t, strings.Contains(string(responseBody), "is now available from your IP"))
 }
 

@@ -253,7 +253,7 @@ func (app *App) RegisterKey(keyBindingToken string, name string, proxy string, s
 	if err != nil {
 		log.Fatalf("Body error: %s", err)
 	}
-	log.Debugf(string(body))
+	log.Debugf("%s", string(body))
 	response := RegisterKeyResponse{}
 	jsonErr := json.Unmarshal(body, &response)
 	if jsonErr != nil {
@@ -709,7 +709,7 @@ func (app *App) RequestPortForward(session *db.Session, publicKey []byte) (PortR
 		log.Warn(err)
 		return PortResponse{}, err
 	}
-	log.Debugf(string(body))
+	log.Debug(string(body))
 	response := PortResponse{}
 	jsonErr := json.Unmarshal(body, &response)
 	if jsonErr != nil {
@@ -1065,7 +1065,7 @@ func (app *App) RunSelfTest() {
 
 	// Test the tunnel
 	log.Info("Testing the tunnel")
-	response, err := httpClient.Get(fmt.Sprintf("http://" + app.Session.SshServer + ":" + strconv.Itoa(app.Session.RemotePort) + "/info"))
+	response, err := httpClient.Get("http://" + app.Session.SshServer + ":" + strconv.Itoa(app.Session.RemotePort) + "/info")
 	if err != nil {
 		log.Fatal(err)
 	}
