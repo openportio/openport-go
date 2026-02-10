@@ -3,6 +3,7 @@ import os
 import shutil
 import signal
 import subprocess
+import threading
 import unittest
 from pathlib import Path
 from typing import Optional
@@ -2261,6 +2262,46 @@ for i in range(%s):
             self.assertNotIn(b"restart_session_token", request)
             self.assertEqual([b"false"], request[b"automatic_restart"])
             self.assertEqual([b"abc.openport.io"], request[b"request_server"])
+        finally:
+            http_server.stop()
+
+    def test_parallel_connections(self):
+        local_server_port = self.osinteraction.get_open_port()
+        http_server = HTTPServerForTests(local_server_port)
+        http_server.run_threaded()
+        try:
+            p = self.start_openport_process(
+                local_server_port,
+            )
+
+            remote_host, remote_port, link = get_remote_host_and_port(
+                p, self.osinteraction
+            )
+            click_open_for_ip_link(link)
+
+            exceptions = []
+
+            def do_multiple_requests():
+                try:
+                    client = SimpleHTTPClient()
+                    for i in range(10):
+                        response = client.get(f"http://{remote_host}:{remote_port}")
+                        self.assertEqual("Hello, world!", response)
+                        sleep(0.1)
+                except Exception as e:
+                    logger.exception("Exception in thread")
+                    exceptions.append(e)
+
+            threads = []
+            for i in range(10):
+                t = threading.Thread(target=do_multiple_requests, daemon=True)
+                t.start()
+                threads.append(t)
+            for t in threads:
+                t.join(timeout=10)
+                if len(exceptions) > 0:
+                    break
+            self.assertListEqual([], exceptions)
         finally:
             http_server.stop()
 

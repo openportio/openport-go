@@ -6,6 +6,7 @@ import (
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
 	"net"
+	"sync"
 )
 
 type TunnelRequest struct {
@@ -27,6 +28,7 @@ type Channel struct {
 	NetConn     *net.Conn       // Connection on listener on the server side, and connection to the local server on the client side
 	QuitChannel chan bool
 	channelType ChannelType
+	writeMu     *sync.Mutex // protects concurrent writes to WSConn
 }
 
 type ChOp byte
@@ -60,6 +62,10 @@ func (c *Channel) GetHeader() []byte {
 
 func (c *Channel) Write(newMsg []byte) error {
 	log.Trace("sending a packet to the websocket ", c.GetKey(), newMsg)
+	if c.writeMu != nil {
+		c.writeMu.Lock()
+		defer c.writeMu.Unlock()
+	}
 	return c.WSConn.WriteMessage(websocket.BinaryMessage, newMsg) // client message
 }
 func (c *Channel) Close() error {
@@ -78,12 +84,12 @@ func (c *Channel) getPayload(chop ChOp, msg []byte) []byte {
 	return append(append(c.GetHeader(), byte(chop)), msg...) // TODO: not very efficient?
 }
 
-func ChannelFromServerMessage(wsConn *websocket.Conn) (*Channel, []byte, ChOp, error) {
+func ChannelFromServerMessage(wsConn *websocket.Conn, writeMu *sync.Mutex) (*Channel, []byte, ChOp, error) {
 	_, msg, err := wsConn.ReadMessage()
-	return ChannelFromMsg(err, msg, wsConn, ClientChannelType)
+	return ChannelFromMsg(err, msg, wsConn, ClientChannelType, writeMu)
 }
 
-func ChannelFromMsg(err error, msg []byte, wsConn *websocket.Conn, channelType ChannelType) (*Channel, []byte, ChOp, error) {
+func ChannelFromMsg(err error, msg []byte, wsConn *websocket.Conn, channelType ChannelType, writeMu *sync.Mutex) (*Channel, []byte, ChOp, error) {
 	if err != nil {
 		return nil, nil, ChOpUnknown, err
 	}
@@ -92,12 +98,13 @@ func ChannelFromMsg(err error, msg []byte, wsConn *websocket.Conn, channelType C
 	}
 	ip := [4]byte{msg[0], msg[1], msg[2], msg[3]}
 	channel := &Channel{
-		ip,
-		binary.LittleEndian.Uint16(msg[4:6]),
-		wsConn,
-		nil,
-		make(chan bool),
-		channelType,
+		IP:          ip,
+		Port:        binary.LittleEndian.Uint16(msg[4:6]),
+		WSConn:      wsConn,
+		NetConn:     nil,
+		QuitChannel: make(chan bool),
+		channelType: channelType,
+		writeMu:     writeMu,
 	}
 	return channel, msg[7:], ChOp(msg[6]), nil
 }

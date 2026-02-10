@@ -1,4 +1,3 @@
-import threading
 from signal import SIGINT
 
 import docker.models.containers
@@ -71,11 +70,10 @@ import inspect
 import json
 import os
 import re
-import socket
 import subprocess
 import sys
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from time import sleep
 from urllib.error import HTTPError
@@ -99,10 +97,10 @@ TEST_FILES_PATH = Path(__file__).parent.parent / "testfiles"
 
 class HTTPServerForTests:
     def __init__(self, port):
-        self.server = HTTPServer(("", port), HTTPRequestHandlerForTests)
+        self.server = ThreadingHTTPServer(("", port), HTTPRequestHandlerForTests)
         self.requests = []
         self.server.requests = self.requests
-        self.server.response = ""
+        self.server.response = "Hello, world!"
 
     def set_response(self, response):
         self.server.response = response  # what a hack
