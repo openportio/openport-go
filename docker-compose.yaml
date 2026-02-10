@@ -3,7 +3,7 @@ services:
     build:
       context: "."
       dockerfile: Dockerfile-amd64
-    command: sh -c "/openport-amd64 register ${KEY_REGISTRATION_TOKEN} --server https://test.openport.io && gotestsum --format standard-verbose --junitfile /apps/go/test-results/report.xml apps/openport/*.go"
+    command: sh -c "/openport-amd64 register ${KEY_REGISTRATION_TOKEN} --server https://test.openport.io && gotestsum --format standard-verbose --junitfile /apps/go/test-results/report.xml ./..."
     user: "${UID}:${GID}"
     volumes:
       - ./src/:/apps/go
