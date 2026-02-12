@@ -81,7 +81,7 @@ class AppTests(unittest.TestCase):
     kill = "kill"
     kill_all = "kill-all"
     version = "version"
-    app_version = "2.2.3"
+    app_version = "2.2.4-beta"
     forward = "forward"
     list = "list"
     ws_options = []
