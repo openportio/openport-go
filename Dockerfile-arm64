@@ -46,6 +46,6 @@ ENV GO_ARCH=arm64
 ENV CC=aarch64-linux-gnu-gcc
 ENV CC_FOR_TARGET=aarch64-linux-gnu-gcc
 RUN go mod download
-
+ENV GOCACHE=/go-cache
 COPY src/ /apps/go/
-RUN go build -ldflags "-s -w -extldflags=-static" -tags netgo -o /openport-arm64 apps/openport/main.go
+RUN --mount=type=cache,target=/go-cache go build -ldflags "-s -w -extldflags=-static" -tags netgo -o /openport-arm64 apps/openport/main.go

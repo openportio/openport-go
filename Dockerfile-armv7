@@ -38,6 +38,6 @@ WORKDIR /apps/go/
 ENV GOARM=7
 
 RUN go mod download
-
+ENV GOCACHE=/go-cache
 COPY src/ /apps/go/
-RUN go build -ldflags "-s -w -extldflags=-static" -tags netgo -o /openport-armv7 apps/openport/main.go
+RUN --mount=type=cache,target=/go-cache go build -ldflags "-s -w -extldflags=-static" -tags netgo -o /openport-armv7 apps/openport/main.go
