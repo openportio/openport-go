@@ -11,5 +11,6 @@ services:
       - ./test-results:/root/.openport/
     environment:
       - HOME=/apps/go/
+      - GOCACHE=
   # // for debugging only
 #      - ./src/:/apps/go/src/
