@@ -44,6 +44,6 @@ COPY src/go.mod \
 WORKDIR /apps/go/
 
 RUN go mod download
-
+ENV GOCACHE=/go-cache
 COPY src/ /apps/go/
-RUN go build -ldflags "-s -w -extldflags=-static" -tags netgo -o /openport-armhf apps/openport/main.go
+RUN --mount=type=cache,target=/go-cache go build -ldflags "-s -w -extldflags=-static" -tags netgo -o /openport-armhf apps/openport/main.go
