@@ -36,7 +36,7 @@ import (
 	"time"
 )
 
-const VERSION = "2.2.3-beta"
+const VERSION = "2.2.3"
 const USER_CONFIG_FILE = "/etc/openport/users.conf"
 const DEFAULT_SERVER = "https://openport.io"
 
