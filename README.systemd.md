@@ -25,7 +25,7 @@ systemctl enable openport@22
 ```
 
 When using the system unit file, openport is _not_ started with
-`restart-sessions`, and so while you may still start adhoc sessions, the the
+`restart-sessions`, and so while you may still start adhoc sessions, the 
 `--restart-on-reboot` flag will have no effect.
 
 If you have additional options you would like to pass to _all_ openport
