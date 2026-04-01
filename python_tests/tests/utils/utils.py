@@ -785,6 +785,91 @@ def is_ci():
     return os.environ.get("IS_CI", "false").lower() == "true"
 
 
+def get_udp_host_from_output(text):
+    """Extract the UDP host from client output like 'UDP forwarding enabled on <host>:<port>'."""
+    m = re.search(r"UDP forwarding enabled on (\S+):(\d+)", text)
+    if m:
+        return m.group(1)
+    return None
+
+
+class SimpleUdpEchoServer:
+    """A UDP server that echoes back received datagrams prefixed with 'echo:'."""
+
+    def __init__(self, port):
+        self.port = port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(("0.0.0.0", port))
+        self.closed = False
+
+    def run(self):
+        while not self.closed:
+            try:
+                data, addr = self.sock.recvfrom(65535)
+                if data:
+                    self.sock.sendto(b"echo:" + data, addr)
+            except OSError:
+                break
+
+    def close(self):
+        self.closed = True
+        try:
+            self.sock.close()
+        except Exception as e:
+            logger.exception(e)
+
+    def run_threaded(self):
+        thr = threading.Thread(target=self.run, daemon=True)
+        thr.start()
+
+
+def check_udp_port_forward(test, remote_host, local_port, remote_port, timeout=5):
+    """Start a local UDP echo server on local_port, send a UDP datagram to
+    remote_host:remote_port, and verify the echo response comes back."""
+    server = SimpleUdpEchoServer(local_port)
+    try:
+        server.run_threaded()
+        time.sleep(0.2)
+
+        message = b"udp_test_ping"
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+        try:
+            sock.sendto(message, (remote_host, remote_port))
+            data, _ = sock.recvfrom(65535)
+            expected = b"echo:" + message
+            test.assertEqual(expected, data, f"UDP echo mismatch: expected {expected!r}, got {data!r}")
+            logger.info("UDP port forward ok")
+        finally:
+            sock.close()
+    finally:
+        server.close()
+
+
+def udp_port_forward_available(remote_host, remote_port, local_port, timeout=3):
+    """Probe whether UDP forwarding actually works on the remote server.
+    Returns True if a UDP echo round-trip succeeds, False on timeout."""
+    server = SimpleUdpEchoServer(local_port)
+    try:
+        server.run_threaded()
+        time.sleep(0.2)
+
+        message = b"udp_probe"
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+        try:
+            sock.sendto(message, (remote_host, remote_port))
+            data, _ = sock.recvfrom(65535)
+            return data == b"echo:" + message
+        except (TimeoutError, OSError):
+            return False
+        finally:
+            sock.close()
+    finally:
+        server.close()
+
+
 if __name__ == "__main__":
     address, client = get_toxi_mysql()
     # client.add_toxic(type='latency', attributes=dict(latency=5000, jitter=0))

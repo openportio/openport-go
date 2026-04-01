@@ -834,6 +834,9 @@ func (app *App) StartReverseTunnel(key ssh.Signer, session db.Session, message s
 	stopFuncRef := app.StopHooks.PushBack(stopFunc)
 	defer app.StopHooks.Remove(stopFuncRef)
 
+	// Also set up UDP forwarding on the same port, over the same SSH connection
+	app.startUDPChannelHandler(sshClient, session)
+
 	app.MarkConnected()
 
 	for {
@@ -861,6 +864,107 @@ func (app *App) StartReverseTunnel(key ssh.Signer, session db.Session, message s
 			}
 		}(conn)
 	}
+}
+
+// startUDPChannelHandler requests the server to also listen on UDP for the same port,
+// and handles incoming "forwarded-udp" channels by forwarding datagrams to the local service.
+func (app *App) startUDPChannelHandler(sshClient *ssh.Client, session db.Session) {
+	payload := ssh.Marshal(struct {
+		Host string
+		Port uint32
+	}{Host: "0.0.0.0", Port: uint32(session.RemotePort)})
+
+	ok, replyData, err := sshClient.Conn.SendRequest("udpip-forward", true, payload)
+	if err != nil {
+		log.Warnf("UDP forwarding not available: %s", err)
+		return
+	}
+	if !ok {
+		log.Warn("UDP forwarding request rejected by server")
+		return
+	}
+
+	// Parse the server's reply to get the public UDP IP
+	udpHost := ""
+	if len(replyData) > 0 {
+		reply := struct {
+			Host string
+			Port uint32
+		}{}
+		if err := ssh.Unmarshal(replyData, &reply); err == nil && reply.Host != "" {
+			udpHost = reply.Host
+		}
+	}
+	if udpHost != "" {
+		log.Infof("UDP forwarding enabled on %s:%d", udpHost, session.RemotePort)
+	} else {
+		log.Infof("UDP forwarding enabled on remote port %d", session.RemotePort)
+	}
+
+	go func() {
+		for newChannel := range sshClient.HandleChannelOpen("forwarded-udp") {
+			go handleUDPChannel(newChannel, session.LocalPort)
+		}
+	}()
+}
+
+func handleUDPChannel(newChannel ssh.NewChannel, localPort int) {
+	sshChan, reqs, err := newChannel.Accept()
+	if err != nil {
+		log.Errorf("Could not accept forwarded-udp channel: %s", err)
+		return
+	}
+	go ssh.DiscardRequests(reqs)
+
+	localAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("127.0.0.1:%d", localPort))
+	if err != nil {
+		log.Errorf("Could not resolve local UDP addr: %s", err)
+		sshChan.Close()
+		return
+	}
+	localConn, err := net.DialUDP("udp", nil, localAddr)
+	if err != nil {
+		log.Errorf("Could not dial local UDP: %s", err)
+		sshChan.Close()
+		return
+	}
+
+	// SSH channel -> local UDP service
+	go func() {
+		defer localConn.Close()
+		defer sshChan.Close()
+		for {
+			data, err := utils.ReadFrame(sshChan)
+			if err != nil {
+				log.Debugf("UDP ReadFrame from SSH ended: %s", err)
+				return
+			}
+			_, err = localConn.Write(data)
+			if err != nil {
+				log.Debugf("UDP write to local service failed: %s", err)
+				return
+			}
+		}
+	}()
+
+	// Local UDP service -> SSH channel
+	go func() {
+		defer localConn.Close()
+		defer sshChan.Close()
+		buf := make([]byte, 65535)
+		for {
+			n, err := localConn.Read(buf)
+			if err != nil {
+				log.Debugf("UDP read from local service ended: %s", err)
+				return
+			}
+			err = utils.WriteFrame(sshChan, buf[:n])
+			if err != nil {
+				log.Debugf("UDP WriteFrame to SSH failed: %s", err)
+				return
+			}
+		}
+	}()
 }
 
 func Connect(key ssh.Signer, session db.Session) (*ssh.Client, chan bool, error) {
