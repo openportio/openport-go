@@ -1,0 +1,36 @@
+# Replaces the Jenkinsfile. Runs on a shell-executor GitLab Runner that has
+# docker + docker-compose-plugin + yq (Python) + openssl available (see
+# gitlab_installation/runner/cloud-init.yaml).
+#
+# Required CI variable (Project → Settings → CI/CD → Variables, masked):
+#   KEY_REGISTRATION_TOKEN — passed into the test docker-compose so the
+#   client can register with test.openport.io. Without it, the Go tests
+#   fail at the register step.
+
+stages:
+  - test
+
+test:
+  stage: test
+  tags:
+    - shell
+  timeout: 1h
+  before_script:
+    - rm -rf test-results
+    - mkdir -p test-results
+  script:
+    - ./jenkins.sh
+  after_script:
+    # Containers write reports and .pyc caches as root into the bind-mounted
+    # source tree. Chown back so the next job's git clean -fdx succeeds.
+    - docker run --rm -v "$CI_PROJECT_DIR":/work alpine sh -c "chown -R $(id -u):$(id -g) /work" || true
+    # Reclaim disk on the small runner droplet (mirrors Jenkinsfile post.always).
+    - docker system prune -f || true
+    - docker volume prune -f || true
+  artifacts:
+    when: always
+    paths:
+      - test-results/
+    reports:
+      junit: test-results/*.xml
+    expire_in: 1 week
