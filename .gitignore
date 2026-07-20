@@ -33,3 +33,7 @@ test-results/
 
 *.pyc
 python_tests/tests/testfiles/tmp/*
+
+# Generated SBOMs (published as CI artifacts / release assets, not committed)
+sbom/
+security-reports/

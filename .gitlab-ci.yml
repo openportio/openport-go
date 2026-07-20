@@ -9,6 +9,7 @@
 
 stages:
   - test
+  - scan
 
 test:
   stage: test
@@ -34,3 +35,92 @@ test:
     reports:
       junit: test-results/*.xml
     expire_in: 1 week
+
+# ---------------------------------------------------------------------------
+# Security scanning (EU Cyber Resilience Act, Annex I Part II)
+#
+# REPORT-ONLY FOR NOW: allow_failure: true on every job, so findings are
+# published as artifacts but do not block. Once the initial backlog is triaged,
+# drop allow_failure so high/critical findings fail the build.
+#
+# This is the client -- the binary end users actually download and run -- so
+# findings here carry more weight than server-side ones.
+# ---------------------------------------------------------------------------
+
+.scan_base:
+  stage: scan
+  tags:
+    - shell
+  timeout: 30m
+  allow_failure: true
+  before_script:
+    - mkdir -p security-reports
+  after_script:
+    - docker run --rm -v "$PWD":/work alpine sh -c "chown -R $(id -u):$(id -g) /work" || true
+    - docker system prune -f || true
+  artifacts:
+    when: always
+    paths:
+      - security-reports/
+    expire_in: 1 month
+
+# Dependency vulnerabilities, call-graph aware.
+#
+# Watch for findings in jinzhu/gorm v1.9.16 -- that package is archived
+# upstream and receives no security backports, so anything reported against it
+# will not be fixed by a version bump. See CRA-COMPLIANCE-PLAN.md item 20.
+govulncheck:
+  extends: .scan_base
+  script:
+    - >
+      docker run --rm -v "$PWD":/repo -w /repo/src golang:1.25.7-bookworm
+      sh -c "go install golang.org/x/vuln/cmd/govulncheck@latest &&
+             \$(go env GOPATH)/bin/govulncheck ./..."
+      | tee security-reports/govulncheck.txt
+
+# Static analysis of first-party code only. src/vendor is excluded: those are
+# upstream sources, covered by govulncheck, and scanning them buries our own
+# findings.
+gosec:
+  extends: .scan_base
+  script:
+    - >
+      docker run --rm -v "$PWD":/repo -w /repo/src securego/gosec:latest
+      -exclude-dir=vendor
+      -fmt=json -out=/repo/security-reports/gosec.json -no-fail ./...
+    - >
+      docker run --rm -v "$PWD":/repo -w /repo/src securego/gosec:latest
+      -exclude-dir=vendor -no-fail ./...
+      | tee security-reports/gosec.txt
+
+# Filesystem scan for vulnerable dependencies and leaked secrets.
+trivy_fs:
+  extends: .scan_base
+  script:
+    - >
+      docker run --rm -v "$PWD":/repo
+      -v trivy-cache:/root/.cache/trivy
+      aquasec/trivy:latest fs /repo
+      --scanners vuln,secret
+      --severity HIGH,CRITICAL
+      --skip-dirs /repo/src/go/pkg
+      --skip-dirs "/repo/old exes"
+      --no-progress
+      | tee security-reports/trivy-fs.txt
+
+# Software Bill of Materials (CRA Annex I Part II(1)).
+#
+# Source-tree SBOM only -- CI does not build the release binaries. The
+# authoritative per-binary SBOMs come from ./generate-sbom.sh after
+# ./docker_compile_all.sh, and those are what ship alongside a release.
+sbom:
+  extends: .scan_base
+  script:
+    - bash -ex ./generate-sbom.sh --source
+    - mv sbom/* security-reports/ || true
+  artifacts:
+    when: always
+    paths:
+      - security-reports/
+    expire_in: 6 months
+
