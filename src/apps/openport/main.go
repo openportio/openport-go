@@ -212,6 +212,28 @@ func run(app *o.App, args []string) {
 			}
 		}
 		app.RegisterKey(*registerKeyToken, *registerKeyName, socksProxy, server)
+	case "rotate-key":
+		_ = registerKeyFlagSet.Parse(args[2:])
+		app.DbHandler.SetPath(dbPath)
+		if help {
+			println("Replaces this machine's key with a newly generated one and registers it,")
+			println("retiring the old key. Your reserved ports are carried over.")
+			println("Usage: openport rotate-key <token> [arguments]")
+			println("Get the token at https://openport.io/user/keys .")
+			registerKeyFlagSet.PrintDefaults()
+			app.Stop(o.EXIT_CODE_HELP)
+			return
+		}
+		o.InitLogging(verbose, o.LogPath)
+		rotateTail := registerKeyFlagSet.Args()
+		if *registerKeyToken == "" {
+			if len(rotateTail) == 0 {
+				log.Fatalf("--token is required. Get it at https://openport.io/user/keys .")
+			} else {
+				registerKeyToken = &rotateTail[0]
+			}
+		}
+		app.RotateKey(*registerKeyToken, *registerKeyName, socksProxy, server)
 	case "version":
 		_ = versionFlagSet.Parse(args[2:])
 		app.DbHandler.SetPath(dbPath)
@@ -407,6 +429,7 @@ func run(app *o.App, args []string) {
 				println("  restart-sessions      Restart all sessions that are started with the --restart-on-reboot flag.")
 				println("  rm <local_port>       Remove a port from your local database.")
 				println("  register <token>      Link your device to your account.")
+				println("  rotate-key <token>    Replace this machine's key with a new one.")
 				println("  version               Show the version of the client executable.")
 				println("Run 'openport <command> --help' for more information about the command.")
 				println("")
@@ -482,7 +505,7 @@ func run(app *o.App, args []string) {
 }
 
 func myUsage() {
-	fmt.Printf("Usage: %s (<port> | forward | list | restart-sessions | kill <port> | kill-all | register <token> | rm <port> | version) [arguments]\n", os.Args[0])
+	fmt.Printf("Usage: %s (<port> | forward | list | restart-sessions | kill <port> | kill-all | register <token> | rotate-key <token> | rm <port> | version) [arguments]\n", os.Args[0])
 	fmt.Println("Type 'openport <command> --help' for more information about the different commands.")
 	fmt.Println("Default: openport <port> [arguments]")
 }

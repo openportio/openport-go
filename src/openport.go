@@ -233,10 +233,53 @@ func Find(a []string, x string) int {
 }
 
 func (app *App) RegisterKey(keyBindingToken string, name string, proxy string, server string) {
+	app.registerKey(keyBindingToken, name, proxy, server, false)
+}
+
+// RotateKey generates a fresh identity key and registers it, telling the
+// server to retire the key it replaces.
+func (app *App) RotateKey(keyBindingToken string, name string, proxy string, server string) {
+	app.registerKey(keyBindingToken, name, proxy, server, true)
+}
+
+func (app *App) registerKey(keyBindingToken string, name string, proxy string, server string, forceRotate bool) {
 	utils.EnsureHomeFolderExists()
-	publicKey, _, err := utils.EnsureKeysExist()
+	publicKey, signer, err := utils.EnsureKeysExist()
 	if err != nil {
 		log.Fatalf("Could not get key: %s", err)
+	}
+
+	// Registering is the natural moment to replace a weak key: the binding
+	// token proves account ownership, so the new key can be attached to the
+	// same account and the old one retired in a single request.
+	//
+	// Rotation is not done automatically outside this flow. The public key is
+	// the account identity, so replacing it without a token would detach the
+	// client from its account.
+	var replacesPublicKey []byte
+	restoreKey := func() {}
+	weak, bits := utils.KeyIsWeak(signer)
+	if forceRotate || weak {
+		if weak {
+			log.Infof("Replacing your %d-bit key with a %d-bit one.", bits, utils.KeyBits)
+		} else {
+			log.Infof("Generating a new %d-bit key.", utils.KeyBits)
+		}
+		replacesPublicKey, publicKey, restoreKey, err = utils.RotateKeys()
+		if err != nil {
+			log.Fatalf("Could not create a new key: %s", err)
+		}
+	}
+
+	// If registration fails after rotating, put the old key back. Otherwise the
+	// client is left holding a key the server has never seen, which means
+	// losing access to the account entirely.
+	//
+	// This cannot be a deferred call: log.Fatalf exits the process and never
+	// runs deferred functions, so every failure path has to restore first.
+	fail := func(format string, args ...interface{}) {
+		restoreKey()
+		log.Fatalf(format, args...)
 	}
 
 	httpClient := GetHttpClient(proxy)
@@ -248,23 +291,29 @@ func (app *App) RegisterKey(keyBindingToken string, name string, proxy string, s
 		"client_version":    {VERSION},
 		"platform":          {runtime.GOOS},
 	}
+	if replacesPublicKey != nil {
+		// Tells the server to retire the key this one replaces, and to move
+		// its reserved ports across. Only honoured within the account the
+		// token belongs to.
+		getParameters["replaces_public_key"] = []string{string(replacesPublicKey)}
+	}
 	log.Debugf("parameters: %s", getParameters)
 	resp, err := httpClient.PostForm(postUrl, getParameters)
 	if err != nil {
-		log.Fatalf("HTTP error: %s", err)
+		fail("HTTP error: %s", err)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("Body error: %s", err)
+		fail("Body error: %s", err)
 	}
 	log.Debugf("%s", string(body))
 	response := RegisterKeyResponse{}
 	jsonErr := json.Unmarshal(body, &response)
 	if jsonErr != nil {
-		log.Fatalf("Json Decode error: %s", err)
+		fail("Json Decode error: %s", err)
 	}
 	if response.Status != "ok" {
-		log.Fatalf("Could not register key: %s", response.Error)
+		fail("Could not register key: %s", response.Error)
 		app.Stop(EXIT_CODE_KEY_REGISTERED_FAILED)
 	} else {
 		log.Info("key successfully registered")

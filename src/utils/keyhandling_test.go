@@ -129,6 +129,101 @@ func TestEnsureKeysExistDoesNotAdoptUserSshKey(t *testing.T) {
 	}
 }
 
+func TestRotateKeysReplacesTheKeyAndReportsTheOldOne(t *testing.T) {
+	withTempOpenportHome(t)
+
+	originalPublic, _, err := EnsureKeysExist()
+	if err != nil {
+		t.Fatalf("EnsureKeysExist: %s", err)
+	}
+
+	oldPublic, newPublic, _, err := RotateKeys()
+	if err != nil {
+		t.Fatalf("RotateKeys: %s", err)
+	}
+
+	if string(oldPublic) != string(originalPublic) {
+		t.Error("the reported old public key is not the key that was in place")
+	}
+	if string(newPublic) == string(originalPublic) {
+		t.Error("the key was not actually replaced")
+	}
+
+	// The new key must be what is now on disk.
+	onDisk, _, err := ReadKeys()
+	if err != nil {
+		t.Fatalf("ReadKeys: %s", err)
+	}
+	if string(onDisk) != string(newPublic) {
+		t.Error("the stored key does not match the returned new key")
+	}
+}
+
+// If registering the new key fails, the old key must come back. A client left
+// holding a key the server has never seen has lost access to its account.
+func TestRotateKeysCanBeUndone(t *testing.T) {
+	withTempOpenportHome(t)
+
+	originalPublic, _, err := EnsureKeysExist()
+	if err != nil {
+		t.Fatalf("EnsureKeysExist: %s", err)
+	}
+	originalPrivate, err := os.ReadFile(OPENPORT_PRIVATE_KEY_PATH)
+	if err != nil {
+		t.Fatalf("reading private key: %s", err)
+	}
+
+	_, newPublic, restore, err := RotateKeys()
+	if err != nil {
+		t.Fatalf("RotateKeys: %s", err)
+	}
+	if string(newPublic) == string(originalPublic) {
+		t.Fatal("precondition: the key should have changed")
+	}
+
+	restore()
+
+	restoredPublic, _, err := ReadKeys()
+	if err != nil {
+		t.Fatalf("ReadKeys after restore: %s", err)
+	}
+	if string(restoredPublic) != string(originalPublic) {
+		t.Error("the original public key was not restored")
+	}
+	restoredPrivate, err := os.ReadFile(OPENPORT_PRIVATE_KEY_PATH)
+	if err != nil {
+		t.Fatalf("reading private key after restore: %s", err)
+	}
+	if string(restoredPrivate) != string(originalPrivate) {
+		t.Error("the original private key was not restored")
+	}
+
+	info, err := os.Stat(OPENPORT_PRIVATE_KEY_PATH)
+	if err != nil {
+		t.Fatalf("stat: %s", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Errorf("restored private key should be 0600, got %04o", perm)
+	}
+}
+
+// Rotating with no key in place is not an error; there is simply nothing to
+// report as replaced.
+func TestRotateKeysWithNoExistingKey(t *testing.T) {
+	withTempOpenportHome(t)
+
+	oldPublic, newPublic, _, err := RotateKeys()
+	if err != nil {
+		t.Fatalf("RotateKeys: %s", err)
+	}
+	if oldPublic != nil {
+		t.Errorf("expected no previous key, got %q", oldPublic)
+	}
+	if len(newPublic) == 0 {
+		t.Error("expected a new key to be generated")
+	}
+}
+
 // An existing key is reused rather than regenerated: the public key is the
 // account identity, so replacing it would detach the client from its account.
 func TestEnsureKeysExistReusesExistingKey(t *testing.T) {

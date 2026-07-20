@@ -105,28 +105,82 @@ func CreateKeys() ([]byte, ssh.Signer, error) {
 // server-side way to relink a new key to an existing account; until that
 // exists, the honest thing is to tell the user.
 func WarnIfKeyIsWeak(key ssh.Signer) {
-	cryptoKey, ok := key.PublicKey().(ssh.CryptoPublicKey)
-	if !ok {
-		return
-	}
-	rsaKey, ok := cryptoKey.CryptoPublicKey().(*rsa.PublicKey)
-	if !ok {
-		// Not RSA; nothing to complain about on size.
-		return
-	}
-	bits := rsaKey.N.BitLen()
-	if bits >= MinAcceptableKeyBits {
+	weak, bits := KeyIsWeak(key)
+	if !weak {
 		return
 	}
 	log.Warnf(
-		"Your openport key in %s is only %d-bit RSA, which is no longer "+
-			"considered secure. Newly created keys are %d-bit. To replace it, "+
-			"delete %s and %s and register again with 'openport register'. "+
-			"Note this creates a new key, so it must be linked to your account "+
-			"again.",
-		OPENPORT_PRIVATE_KEY_PATH, bits, KeyBits,
-		OPENPORT_PRIVATE_KEY_PATH, OPENPORT_PUBLIC_KEY_PATH,
+		"Your openport key is only %d-bit RSA, which is no longer considered "+
+			"secure. Run 'openport rotate-key <token>' to replace it with a "+
+			"%d-bit key; your reserved ports are carried over. Get the token at "+
+			"https://openport.io/user/keys .",
+		bits, KeyBits,
 	)
+}
+
+// KeyIsWeak reports whether an identity key is below MinAcceptableKeyBits,
+// and its size. Non-RSA keys are never considered weak on size.
+func KeyIsWeak(key ssh.Signer) (bool, int) {
+	cryptoKey, ok := key.PublicKey().(ssh.CryptoPublicKey)
+	if !ok {
+		return false, 0
+	}
+	rsaKey, ok := cryptoKey.CryptoPublicKey().(*rsa.PublicKey)
+	if !ok {
+		return false, 0
+	}
+	bits := rsaKey.N.BitLen()
+	return bits < MinAcceptableKeyBits, bits
+}
+
+// RotateKeys replaces the stored identity key with a freshly generated one.
+//
+// It returns the previous public key, the new one, and a restore function.
+//
+// The old public key is what lets the server retire the key being replaced:
+// it is sent as replaces_public_key when registering. Without it the old key
+// stays active and remains a usable credential.
+//
+// The restore function puts the previous key back. Registering the new key can
+// fail -- the network drops, the token is wrong, the account is at its key
+// limit -- and a client left holding a key the server has never seen has lost
+// access to its account with no way back. Callers must restore on any failure
+// to register.
+func RotateKeys() (oldPublicKey []byte, newPublicKey []byte, restore func(), err error) {
+	EnsureHomeFolderExists()
+
+	// Read the existing material before overwriting it, so it can be put back.
+	previousPrivate, privateErr := os.ReadFile(OPENPORT_PRIVATE_KEY_PATH)
+	previousPublic, publicErr := os.ReadFile(OPENPORT_PUBLIC_KEY_PATH)
+	hadPreviousKey := privateErr == nil && publicErr == nil
+
+	if hadPreviousKey {
+		oldPublicKey = previousPublic
+	} else {
+		log.Debug("No existing key pair to rotate away from; creating a new one.")
+	}
+
+	restore = func() {
+		if !hadPreviousKey {
+			return
+		}
+		if err := os.WriteFile(OPENPORT_PRIVATE_KEY_PATH, previousPrivate, 0600); err != nil {
+			log.Errorf("Could not restore your previous private key: %s", err)
+			return
+		}
+		if err := os.WriteFile(OPENPORT_PUBLIC_KEY_PATH, previousPublic, 0644); err != nil {
+			log.Errorf("Could not restore your previous public key: %s", err)
+			return
+		}
+		log.Info("Your previous key has been restored; nothing was changed.")
+	}
+
+	newPublicKey, _, err = CreateKeys()
+	if err != nil {
+		restore()
+		return nil, nil, restore, err
+	}
+	return oldPublicKey, newPublicKey, restore, nil
 }
 
 func ReadKeys() ([]byte, ssh.Signer, error) {
