@@ -33,17 +33,41 @@ var OPENPORT_HOME = path.Join(HOMEDIR, ".openport")
 var OPENPORT_PRIVATE_KEY_PATH = path.Join(OPENPORT_HOME, "id_rsa")
 var OPENPORT_PUBLIC_KEY_PATH = path.Join(OPENPORT_HOME, "id_rsa.pub")
 
-var SSH_PRIVATE_KEY_PATH = path.Join(HOMEDIR, ".ssh", "id_rsa")
-var SSH_PUBLIC_KEY_PATH = path.Join(HOMEDIR, ".ssh", "id_rsa.pub")
+// Note: the user's own ~/.ssh keys are deliberately not referenced any more.
+// EnsureKeysExist used to adopt ~/.ssh/id_rsa as the openport identity; see the
+// comment there for why that was removed.
+
+// KeyBits is the size of newly generated RSA identity keys.
+//
+// This was 1024 until 2026-07, which has been below every published baseline
+// since NIST disallowed it in 2013. These are long-lived keys registered to a
+// user's account, so a weak one is not a transient exposure.
+//
+// Ed25519 would be the better choice -- shorter, faster, no parameter to get
+// wrong -- but the server cannot accept it yet: the key validator, the key
+// stripper and the Go SSH server all assume an "ssh-rsa " prefix. Once those
+// are fixed and deployed, switch this over. See CRA-COMPLIANCE-PLAN.md item 10.
+const KeyBits = 4096
+
+// MinAcceptableKeyBits is the size below which an existing key is considered
+// too weak to keep using. Existing keys are not rotated automatically -- see
+// WarnIfKeyIsWeak.
+const MinAcceptableKeyBits = 2048
 
 func CreateKeys() ([]byte, ssh.Signer, error) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	privateKey, err := rsa.GenerateKey(rand.Reader, KeyBits)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// generate and write private key as PEM
-	privateKeyFile, err := os.Create(OPENPORT_PRIVATE_KEY_PATH)
+	// Write the private key 0600 explicitly. os.Create uses 0666 before umask,
+	// so on a permissive umask the private key was world-readable. The
+	// containing directory is 0700, which mitigated it but did not fix it.
+	privateKeyFile, err := os.OpenFile(
+		OPENPORT_PRIVATE_KEY_PATH,
+		os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
+		0600,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -62,11 +86,47 @@ func CreateKeys() ([]byte, ssh.Signer, error) {
 	if err != nil {
 		hostname = "unknown"
 	}
-	err = os.WriteFile(OPENPORT_PUBLIC_KEY_PATH, []byte(fmt.Sprintf("%s %s", ssh.MarshalAuthorizedKey(pub), hostname)), 0655)
+	// 0644, not 0655. The public key is not secret, but 0655 granted group and
+	// other the execute bit on a data file, which was simply a typo.
+	err = os.WriteFile(OPENPORT_PUBLIC_KEY_PATH, []byte(fmt.Sprintf("%s %s", ssh.MarshalAuthorizedKey(pub), hostname)), 0644)
 	if err != nil {
 		return nil, nil, err
 	}
 	return ReadKeys()
+}
+
+// WarnIfKeyIsWeak reports an existing identity key that is below
+// MinAcceptableKeyBits.
+//
+// It deliberately does not rotate the key. The public key *is* the account
+// identity -- the server looks up the user by it on every request -- so
+// silently generating a new one would detach the client from its account and
+// drop a paying user onto the free tier. Migrating existing keys needs a
+// server-side way to relink a new key to an existing account; until that
+// exists, the honest thing is to tell the user.
+func WarnIfKeyIsWeak(key ssh.Signer) {
+	cryptoKey, ok := key.PublicKey().(ssh.CryptoPublicKey)
+	if !ok {
+		return
+	}
+	rsaKey, ok := cryptoKey.CryptoPublicKey().(*rsa.PublicKey)
+	if !ok {
+		// Not RSA; nothing to complain about on size.
+		return
+	}
+	bits := rsaKey.N.BitLen()
+	if bits >= MinAcceptableKeyBits {
+		return
+	}
+	log.Warnf(
+		"Your openport key in %s is only %d-bit RSA, which is no longer "+
+			"considered secure. Newly created keys are %d-bit. To replace it, "+
+			"delete %s and %s and register again with 'openport register'. "+
+			"Note this creates a new key, so it must be linked to your account "+
+			"again.",
+		OPENPORT_PRIVATE_KEY_PATH, bits, KeyBits,
+		OPENPORT_PRIVATE_KEY_PATH, OPENPORT_PUBLIC_KEY_PATH,
+	)
 }
 
 func ReadKeys() ([]byte, ssh.Signer, error) {
@@ -101,47 +161,30 @@ func EnsureHomeFolderExists() {
 
 func EnsureKeysExist() ([]byte, ssh.Signer, error) {
 	EnsureHomeFolderExists()
+
 	if _, err := os.Stat(OPENPORT_PRIVATE_KEY_PATH); err == nil {
-		// File exists
-		return ReadKeys()
-	} else {
-		_, err1 := os.Stat(SSH_PRIVATE_KEY_PATH)
-		_, err2 := os.Stat(SSH_PUBLIC_KEY_PATH)
-		if err1 == nil && err2 == nil {
-			// ssh-key exists
-			buf, err := os.ReadFile(SSH_PRIVATE_KEY_PATH)
-			if err != nil {
-				log.Warn(err)
-				return CreateKeys()
-			}
-
-			block, rest := pem.Decode(buf)
-			if len(rest) > 0 {
-				log.Debug("Extra data included in key, creating new keys.")
-				return CreateKeys()
-			} else {
-				if x509.IsEncryptedPEMBlock(block) {
-					log.Debug("Encrypted key, creating new keys.")
-					return CreateKeys()
-				} else {
-					log.Debugf("Usable keys in %s, copying to %s", SSH_PUBLIC_KEY_PATH, OPENPORT_PUBLIC_KEY_PATH)
-					err = os.WriteFile(OPENPORT_PRIVATE_KEY_PATH, buf, 0600)
-					if err != nil {
-						log.Warn(err)
-						return CreateKeys()
-					}
-
-					pubBuf, err := os.ReadFile(SSH_PUBLIC_KEY_PATH)
-					err = os.WriteFile(OPENPORT_PUBLIC_KEY_PATH, pubBuf, 0600)
-					if err != nil {
-						log.Warn(err)
-						return CreateKeys()
-					}
-					return ReadKeys()
-				}
-			}
-		} else {
-			return CreateKeys()
+		publicKey, signer, err := ReadKeys()
+		if err == nil {
+			WarnIfKeyIsWeak(signer)
 		}
+		return publicKey, signer, err
 	}
+
+	// Always generate a dedicated key.
+	//
+	// This used to copy the user's general-purpose ~/.ssh/id_rsa into
+	// ~/.openport/ and register that public key with openport.io. That was
+	// poor hygiene and surprising: a user's primary SSH identity -- the one
+	// that may authenticate them to their own servers, their forge, their
+	// employer's infrastructure -- became a third-party service credential
+	// without being asked.
+	//
+	// It also silently defeated the key-strength fix: on any machine with an
+	// existing ~/.ssh/id_rsa, a fresh install would adopt that key, whatever
+	// its size or age, instead of generating a strong one.
+	//
+	// This only affects new installations. Anyone who already has
+	// ~/.openport/id_rsa keeps it, including keys that were copied in by the
+	// old behaviour, so no existing account linkage is broken.
+	return CreateKeys()
 }
