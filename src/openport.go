@@ -72,6 +72,10 @@ type PortResponse struct {
 	KeyId                 int     `json:"key_id"`
 	Error                 string  `json:"error"`
 	FatalError            bool    `json:"fatal_error"`
+	// HostKey is the SSH server's public host key in authorized_keys format.
+	// Empty when talking to a server that predates host key publication; the
+	// client then falls back to trust-on-first-use. See utils/hostkey.go.
+	HostKey string `json:"host_key"`
 }
 
 type RegisterKeyResponse struct {
@@ -737,6 +741,12 @@ func (app *App) RequestPortForward(session *db.Session, publicKey []byte) (PortR
 	session.OpenPortForIpLink = response.OpenPortForIpLink
 	session.FallbackSshServerIp = response.FallbackSshServerIp
 	session.FallbackSshServerPort = response.FallbackSshServerPort
+	// Only overwrite a stored host key when the server actually published one.
+	// Otherwise a server that stops sending host_key would silently downgrade
+	// a session that was previously verifying.
+	if response.HostKey != "" {
+		session.HostKey = response.HostKey
+	}
 	err = app.DbHandler.Save(session)
 
 	if err != nil {
@@ -805,17 +815,20 @@ func (app *App) StartReverseTunnel(key ssh.Signer, session db.Session, message s
 }
 
 func Connect(key ssh.Signer, session db.Session) (*ssh.Client, chan bool, error) {
+	hostKeyCallback, err := utils.HostKeyCallback(session.HostKey)
+	if err != nil {
+		return nil, nil, err
+	}
 	config := &ssh.ClientConfig{
 		User: "open",
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(key),
 		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         time.Duration(session.KeepAliveSeconds) * time.Second,
 	}
 
 	var sshClient *ssh.Client
-	var err error
 	sshAddress := fmt.Sprintf("%s:%d", session.SshServer, 22)
 	fallbackSshAddress := fmt.Sprintf("%s:%d", session.FallbackSshServerIp, session.FallbackSshServerPort)
 	if session.Proxy != "" {

@@ -36,6 +36,12 @@ type Session struct {
 	Proxy            string
 	ForwardTunnel    bool `sql:"default:false"`
 
+	// HostKey is the SSH server's expected public host key, in authorized_keys
+	// format, as published by the API. Persisted so that a session restarted
+	// from the database still has something to verify against before it has
+	// had a chance to call the API again.
+	HostKey string
+
 	FallbackSshServerIp   string `gorm:"-"`
 	FallbackSshServerPort int    `gorm:"-"`
 	AutomaticRestart      bool   `gorm:"-"`
