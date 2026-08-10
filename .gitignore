@@ -37,3 +37,7 @@ python_tests/tests/testfiles/tmp/*
 # Generated SBOMs (published as CI artifacts / release assets, not committed)
 sbom/
 security-reports/
+
+# generated keypair for python_tests/tests/old_versions upgrade test
+test_id_rsa
+test_id_rsa.pub

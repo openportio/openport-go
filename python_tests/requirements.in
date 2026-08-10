@@ -7,3 +7,4 @@ toxiproxy-python
 
 black
 pytest
+pytest-subtests

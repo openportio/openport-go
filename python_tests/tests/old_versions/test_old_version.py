@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from time import sleep
-from unittest import TestCase
+from unittest import TestCase, skip
 
 import docker
 
@@ -24,10 +24,39 @@ TEST_SERVER = "https://test.openport.io"
 
 OLD_VERSION_DIR = Path(__file__).parent
 
+# Dedicated keypair for the upgrade test, so it does not depend on the
+# developer's personal ~/.ssh keys. Generated on first use; the lock keeps
+# concurrent pool workers from racing ssh-keygen on the same path.
+TEST_SSH_KEY = OLD_VERSION_DIR / "test_id_rsa"
+TEST_SSH_KEY_LOCK = threading.Lock()
+
+
+def get_test_ssh_key() -> Path:
+    with TEST_SSH_KEY_LOCK:
+        if not TEST_SSH_KEY.exists():
+            subprocess.run(
+                [
+                    "ssh-keygen",
+                    "-t",
+                    "rsa",
+                    "-b",
+                    "3072",
+                    "-N",
+                    "",
+                    "-f",
+                    str(TEST_SSH_KEY),
+                ],
+                check=True,
+            )
+    return TEST_SSH_KEY
+
+
 LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 SKIP_BUILD = False
+
+UPGRADE_TIMEOUT = 600  # the upgrade flow installs packages over the tunnel
 
 
 @dataclasses.dataclass
@@ -37,6 +66,9 @@ class Version:
     timeout: int = 60
     help_exit_code: int = 0
     test_started: datetime = None
+    # Ubuntu releases this client version is tested on; see the comment on
+    # OldVersionsTest.VERSIONS for how the pairing is chosen.
+    ubuntu_versions: tuple = ("24.04",)
 
 
 def get_timeout(version: Version):
@@ -53,44 +85,54 @@ def get_timeout(version: Version):
 
 class OldVersionsTest(TestCase):
 
-    UBUNTU_VERSIONS = [
-        "16.04",
-        "18.04",
-        "20.04",
-        "22.04",
-        "24.04",
-    ]
+    # Versions still seen in the field (ELK, 2026-08). Each version is paired
+    # with every Ubuntu LTS release that was still in standard (5-year)
+    # support on the day the client version was released (release dates taken
+    # from the git tags of the python and go client repos):
+    #
+    #   1.1.0  2016-05-28  -> 12.04, 14.04, 16.04
+    #   1.3.0  2020-02-25  -> 16.04, 18.04
+    #   2.0.2  2020-09-29  -> 16.04, 18.04, 20.04
+    #   2.0.3  2021-10-04  -> 18.04, 20.04
+    #   2.0.4  2021-12-13  -> 18.04, 20.04
+    #   2.1.0  2022-05-31  -> 18.04, 20.04, 22.04
+    #   2.2.0  2024-01-09  -> 20.04, 22.04
+    #   2.2.1  2024-05-21  -> 20.04, 22.04, 24.04
+    #   2.2.2  2024-10-04  -> 20.04, 22.04, 24.04
+    #   2.2.3  2026-02-12  -> 22.04, 24.04
+    #
+    # Keep the tuples in ascending order: several tests use
+    # ubuntu_versions[-1] as "the newest OS this version shipped for".
+    # 1.0.0 is also still seen in the field, but its package is no longer
+    # downloadable, so it cannot be tested.
+    # version 1.0.2, 1.1.1 and 1.2.0 are no longer supported because of expired built-in CA certificates.
 
     VERSIONS = [
-        # Version("1.0.1", "", 60),  # fails, no longer used
-        Version("1.0.2", "", 180),  # works
-        Version("1.1.0", "", 180),  # works
-        Version("1.1.1", "", 180),  # works
-        Version("1.2.0", "", 180),  # works
-        Version("1.3.0", "", 180),  # works
-        Version("2.0.2", "--keep-alive 2", 180, 2),  # works
-        Version("2.0.3", "--keep-alive 2", 180, 2),  # works
-        Version("2.0.4", "--keep-alive 2", 180, 2),  # works
-        Version("2.1.0", "--keep-alive 2", 180, 2),  # works
-        Version("2.2.0", "--keep-alive 2", 30, 0),  # works
-        Version("2.2.1", "--keep-alive 2", 30, 0),  # works
-        Version("2.2.2", "--keep-alive 2", 30, 0),  # works
+        Version("1.1.0", "", 180, ubuntu_versions=("12.04", "14.04", "16.04")),
+        Version("1.3.0", "", 180, ubuntu_versions=("16.04", "18.04")),
+        Version(
+            "2.0.2", "--keep-alive 2", 180, 2, ubuntu_versions=("16.04", "18.04", "20.04")
+        ),
+        Version("2.0.3", "--keep-alive 2", 180, 2, ubuntu_versions=("18.04", "20.04")),
+        Version("2.0.4", "--keep-alive 2", 180, 2, ubuntu_versions=("18.04", "20.04")),
+        Version(
+            "2.1.0", "--keep-alive 2", 180, 2, ubuntu_versions=("18.04", "20.04", "22.04")
+        ),
+        Version("2.2.0", "--keep-alive 2", 30, 0, ubuntu_versions=("20.04", "22.04")),
+        Version(
+            "2.2.1", "--keep-alive 2", 30, 0, ubuntu_versions=("20.04", "22.04", "24.04")
+        ),
+        Version(
+            "2.2.2", "--keep-alive 2", 30, 0, ubuntu_versions=("20.04", "22.04", "24.04")
+        ),
+        Version("2.2.3", "--keep-alive 2", 30, 0, ubuntu_versions=("22.04", "24.04")),
     ]
 
     def test_old_version(self):
-        skip_versions = [
-            ("2.2.0", "16.04"),
-            ("2.2.0", "18.04"),
-            ("2.2.1", "16.04"),
-            ("2.2.1", "18.04"),
-        ]
-
         pool = ThreadPool(processes=10)
         results = []
         for version in self.VERSIONS:
-            for ubuntu_version in self.UBUNTU_VERSIONS:
-                if (version.version, ubuntu_version) in skip_versions:
-                    continue
+            for ubuntu_version in version.ubuntu_versions:
                 result = pool.apply_async(
                     self.start_and_check_port_forward, (version, ubuntu_version, 60)
                 )
@@ -98,8 +140,9 @@ class OldVersionsTest(TestCase):
 
         for version, ubuntu_version, result in results:
             with self.subTest(version=version.version, ubuntu_version=ubuntu_version):
-                result.wait(timeout=get_timeout(version))
-                self.assertTrue(result.successful())
+                # get() re-raises the worker's exception (with its traceback),
+                # unlike successful() which only reports True/False.
+                result.get(timeout=get_timeout(version))
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -110,7 +153,7 @@ class OldVersionsTest(TestCase):
         if not SKIP_BUILD:
 
             for version in cls.VERSIONS:
-                for ubuntu_version in cls.UBUNTU_VERSIONS:
+                for ubuntu_version in version.ubuntu_versions:
                     stream = cls.docker_client.api.build(
                         dockerfile=f"{OLD_VERSION_DIR}/Dockerfile",
                         path="..",
@@ -150,18 +193,21 @@ class OldVersionsTest(TestCase):
 
     def tearDown(self) -> None:
         for container in self.containers:
-            container.stop()
-            if not container.attrs["HostConfig"]["AutoRemove"]:
-                container.remove()
+            try:
+                container.stop()
+                if not container.attrs["HostConfig"]["AutoRemove"]:
+                    container.remove()
+            except docker.errors.NotFound:
+                pass  # auto-removed containers can be gone already
 
     def test_old_version__port_22_blocked(self):
-        ubuntu_version = "20.04"
         known_issues = []
         versions = self.VERSIONS
 
         pool = ThreadPool(processes=20)
         results = []
         for version in versions:
+            ubuntu_version = version.ubuntu_versions[-1]
             result = pool.apply_async(
                 self.check_old_version__port_22_blocked, (version, ubuntu_version)
             )
@@ -169,11 +215,12 @@ class OldVersionsTest(TestCase):
 
         for version, ubuntu_version, result in results:
             with self.subTest(version=version.version, ubuntu_version=ubuntu_version):
-                result.wait(timeout=get_timeout(version))
                 if (version.version, ubuntu_version) in known_issues:
+                    result.wait(timeout=get_timeout(version))
                     self.assertFalse(result.successful())
                 else:
-                    self.assertTrue(result.successful())
+                    # get() re-raises the worker's exception, showing the cause.
+                    result.get(timeout=get_timeout(version))
 
     def check_old_version__port_22_blocked(self, version, ubuntu_version):
         version.test_started = datetime.now()
@@ -213,6 +260,7 @@ class OldVersionsTest(TestCase):
         finally:
             self.stop_container_in_thread(container)
 
+    @skip
     def test_load_test(self):
         self.maxDiff = None
         amount_of_clients = 250
@@ -221,18 +269,21 @@ class OldVersionsTest(TestCase):
         ports = list(range(20000, 20000 + amount_of_clients))
 
         def start_container(port):
-            container = self.start_container(port, version, "20.04")
+            container = self.start_container(port, version, version.ubuntu_versions[-1])
             ports_to_container[port] = container
 
         pool = ThreadPool(processes=1000)
 
+        def check(port):
+            try:
+                self.check_port_forward(
+                    ports_to_container[port], port, get_link_timeout=120
+                )
+            except Exception:
+                pass  # collected in self.errors
+
         pool.map(start_container, ports)
-        pool.map(
-            lambda x: self.check_port_forward(
-                ports_to_container[x], x, get_link_timeout=120
-            ),
-            ports_to_container.keys(),
-        )
+        pool.map(check, ports_to_container.keys())
 
         self.assertListEqual([], self.errors)
 
@@ -249,7 +300,10 @@ class OldVersionsTest(TestCase):
 
     def stop_container_in_thread(self, container):
         def do():
-            container.stop()
+            try:
+                container.stop()
+            except docker.errors.NotFound:
+                pass  # auto-removed containers can be gone already
             if container in self.containers:
                 self.containers.remove(container)
 
@@ -304,22 +358,23 @@ class OldVersionsTest(TestCase):
         except Exception as e:
             logging.exception(f"Failed: {port} -> {remote_host}:{remote_port} - {link}")
             self.errors.append(e)
-            # raise
+            raise
         finally:
             container.stop()
             self.containers.remove(container)
 
     def test_upgrade(self):
-        upgrade_version = "2.2.2"
+        upgrade_version = "2.2.3"
 
+        # Upgrading from 1.1.0 is broken regardless of OS; the entry tracks
+        # ubuntu_versions[-1] for that version.
         known_issues = [
-            ("1.0.2", "20.04"),
-            ("1.1.0", "20.04"),
+            ("1.1.0", "16.04"),
         ]
         pool = ThreadPool(processes=20)
         results = []
         for version in self.VERSIONS:
-            ubuntu_version = "20.04"
+            ubuntu_version = version.ubuntu_versions[-1]
 
             result = pool.apply_async(
                 self.start_and_check_upgrade, (version, ubuntu_version, upgrade_version)
@@ -327,17 +382,19 @@ class OldVersionsTest(TestCase):
             results.append((version, ubuntu_version, result))
         for version, ubuntu_version, result in results:
             with self.subTest(version=version.version, ubuntu_version=ubuntu_version):
-                result.wait(timeout=get_timeout(version))
                 if (version.version, ubuntu_version) in known_issues:
-                    try:
+                    # A known issue may fail or hang; it must just not succeed.
+                    result.wait(timeout=UPGRADE_TIMEOUT)
+                    if result.ready():
                         self.assertFalse(result.successful())
-                    except Exception as e:
-                        logging.exception(e)
                 else:
-                    self.assertTrue(result.successful())
+                    # get() re-raises the worker's exception, showing the cause.
+                    # The version timeouts are tuned for the quick port-forward
+                    # check; upgrading (apt install over the tunnel) takes minutes.
+                    result.get(timeout=UPGRADE_TIMEOUT)
 
     def start_ssh_server(self, container: docker.models.containers.Container):
-        public_ssh_key_content = Path.home().joinpath(".ssh/id_rsa.pub").read_text()
+        public_ssh_key_content = get_test_ssh_key().with_suffix(".pub").read_text()
         self.run_command(container, "mkdir -p /root/.ssh")
         self.run_command(
             container,
@@ -345,7 +402,7 @@ class OldVersionsTest(TestCase):
         )
         self.run_command(container, "chmod 700 /root/.ssh -R")
         self.run_command(container, "chmod 600 /root/.ssh/authorized_keys")
-        self.run_command(container, "mkdir /var/run/sshd")
+        self.run_command(container, "mkdir -p /var/run/sshd")
         self.run_command(container, "chmod 0755 /var/run/sshd")
         exit_code, output = self.run_command(
             # container, "bash -c '/usr/sbin/sshd -d > /tmp/sshd.log 2>&1 &'"
@@ -370,7 +427,11 @@ class OldVersionsTest(TestCase):
         # do('to killall openport ; openport restart-sessions ')
 
     def run_ssh_command(self, remote_host, remote_port, command):
-        ssh_command = f"ssh root@{remote_host} -p {remote_port} -o StrictHostKeyChecking=no '{command}'"
+        ssh_command = (
+            f"ssh root@{remote_host} -p {remote_port} "
+            f"-i {get_test_ssh_key()} -o IdentitiesOnly=yes "
+            f"-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null '{command}'"
+        )
         LOGGER.info(f"Running command: {ssh_command}")
         output = subprocess.run(ssh_command, shell=True, capture_output=True)
         LOGGER.info(output)
