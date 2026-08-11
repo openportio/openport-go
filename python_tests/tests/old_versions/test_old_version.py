@@ -1,5 +1,6 @@
 import dataclasses
 import logging
+import os
 import subprocess
 import threading
 from datetime import datetime, timedelta
@@ -54,7 +55,12 @@ def get_test_ssh_key() -> Path:
 LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-SKIP_BUILD = False
+# Image build behaviour (env OPENPORT_TEST_BUILD):
+#   auto   (default) build only images that do not exist locally
+#   always rebuild everything - needed after changing the Dockerfile, since
+#          "auto" will happily keep using an outdated existing image
+#   never  fail fast when an image is missing instead of building it
+BUILD_MODE = os.environ.get("OPENPORT_TEST_BUILD", "auto")
 
 UPGRADE_TIMEOUT = 600  # the upgrade flow installs packages over the tunnel
 
@@ -86,20 +92,30 @@ def get_timeout(version: Version):
 class OldVersionsTest(TestCase):
 
     # Versions still seen in the field (ELK, 2026-08). Each version is paired
-    # with every Ubuntu LTS release that was still in standard (5-year)
-    # support on the day the client version was released (release dates taken
-    # from the git tags of the python and go client repos):
+    # with every Ubuntu LTS release that was in standard (5-year) support at
+    # some point while that client version was the newest one available —
+    # i.e. between its release and the release of its successor. Users
+    # install "the current version" on whatever supported LTS they run, so an
+    # LTS released mid-window counts too.
     #
-    #   1.1.0  2016-05-28  -> 12.04, 14.04, 16.04
-    #   1.3.0  2020-02-25  -> 16.04, 18.04
-    #   2.0.2  2020-09-29  -> 16.04, 18.04, 20.04
-    #   2.0.3  2021-10-04  -> 18.04, 20.04
-    #   2.0.4  2021-12-13  -> 18.04, 20.04
-    #   2.1.0  2022-05-31  -> 18.04, 20.04, 22.04
-    #   2.2.0  2024-01-09  -> 20.04, 22.04
-    #   2.2.1  2024-05-21  -> 20.04, 22.04, 24.04
-    #   2.2.2  2024-10-04  -> 20.04, 22.04, 24.04
-    #   2.2.3  2026-02-12  -> 22.04, 24.04
+    # Availability dates come from the Last-Modified headers of the .deb
+    # files on https://openport.io/static/releases/ (what Linux users could
+    # actually download), except 2.2.2 whose deb was re-uploaded in Dec 2025
+    # for the certificate re-signing — its git tag date is used instead.
+    # 1.1.0's successor is 1.1.1 (2018-09-02); 1.3.0's is the 2.0.2 deb
+    # (2021-01-21) because 1.4.0 was never published as a deb.
+    #
+    #   version  available   superseded   LTS in support during window
+    #   1.1.0    2016-05-28  2018-09-02   12.04, 14.04, 16.04, 18.04
+    #   1.3.0    2020-02-25  2021-01-21   16.04, 18.04, 20.04
+    #   2.0.2    2021-01-21  2021-10-11   16.04, 18.04, 20.04
+    #   2.0.3    2021-10-11  2021-12-13   18.04, 20.04
+    #   2.0.4    2021-12-13  2022-06-08   18.04, 20.04, 22.04
+    #   2.1.0    2022-06-08  2024-01-09   18.04, 20.04, 22.04
+    #   2.2.0    2024-01-09  2024-05-21   20.04, 22.04, 24.04
+    #   2.2.1    2024-05-21  2024-10-04   20.04, 22.04, 24.04
+    #   2.2.2    2024-10-04  2026-02-12   20.04, 22.04, 24.04
+    #   2.2.3    2026-02-12  (current)    22.04, 24.04, 26.04
     #
     # Keep the tuples in ascending order: several tests use
     # ubuntu_versions[-1] as "the newest OS this version shipped for".
@@ -108,24 +124,32 @@ class OldVersionsTest(TestCase):
     # version 1.0.2, 1.1.1 and 1.2.0 are no longer supported because of expired built-in CA certificates.
 
     VERSIONS = [
-        Version("1.1.0", "", 180, ubuntu_versions=("12.04", "14.04", "16.04")),
-        Version("1.3.0", "", 180, ubuntu_versions=("16.04", "18.04")),
+        Version(
+            "1.1.0", "", 180, ubuntu_versions=("12.04", "14.04", "16.04", "18.04")
+        ),
+        Version("1.3.0", "", 180, ubuntu_versions=("16.04", "18.04", "20.04")),
         Version(
             "2.0.2", "--keep-alive 2", 180, 2, ubuntu_versions=("16.04", "18.04", "20.04")
         ),
         Version("2.0.3", "--keep-alive 2", 180, 2, ubuntu_versions=("18.04", "20.04")),
-        Version("2.0.4", "--keep-alive 2", 180, 2, ubuntu_versions=("18.04", "20.04")),
+        Version(
+            "2.0.4", "--keep-alive 2", 180, 2, ubuntu_versions=("18.04", "20.04", "22.04")
+        ),
         Version(
             "2.1.0", "--keep-alive 2", 180, 2, ubuntu_versions=("18.04", "20.04", "22.04")
         ),
-        Version("2.2.0", "--keep-alive 2", 30, 0, ubuntu_versions=("20.04", "22.04")),
+        Version(
+            "2.2.0", "--keep-alive 2", 30, 0, ubuntu_versions=("20.04", "22.04", "24.04")
+        ),
         Version(
             "2.2.1", "--keep-alive 2", 30, 0, ubuntu_versions=("20.04", "22.04", "24.04")
         ),
         Version(
             "2.2.2", "--keep-alive 2", 30, 0, ubuntu_versions=("20.04", "22.04", "24.04")
         ),
-        Version("2.2.3", "--keep-alive 2", 30, 0, ubuntu_versions=("22.04", "24.04")),
+        Version(
+            "2.2.3", "--keep-alive 2", 30, 0, ubuntu_versions=("22.04", "24.04", "26.04")
+        ),
     ]
 
     def test_old_version(self):
@@ -150,22 +174,37 @@ class OldVersionsTest(TestCase):
         cls.osinteraction = osinteraction.getInstance()
         cls.docker_client = docker.from_env()
 
-        if not SKIP_BUILD:
+        for version in cls.VERSIONS:
+            for ubuntu_version in version.ubuntu_versions:
+                tag = f"openport-client:{ubuntu_version}_{version.version}"
 
-            for version in cls.VERSIONS:
-                for ubuntu_version in version.ubuntu_versions:
-                    stream = cls.docker_client.api.build(
-                        dockerfile=f"{OLD_VERSION_DIR}/Dockerfile",
-                        path="..",
-                        tag=f"openport-client:{ubuntu_version}_{version.version}",
-                        buildargs={
-                            "OPENPORT_VERSION": version.version,
-                            "UBUNTU_VERSION": ubuntu_version,
-                        },
-                    )
+                if BUILD_MODE != "always":
+                    try:
+                        cls.docker_client.images.get(tag)
+                        continue
+                    except docker.errors.ImageNotFound:
+                        if BUILD_MODE == "never":
+                            raise Exception(
+                                f"Image {tag} does not exist and "
+                                f"OPENPORT_TEST_BUILD=never; run once with "
+                                f"OPENPORT_TEST_BUILD=always to build it."
+                            )
 
-                    for line in stream:
-                        print(line)
+                # The Dockerfile uses nothing from the build context (it wgets
+                # the deb), so keep the context to this directory - a context of
+                # ".." tars the whole repo (~1.5GB) into the daemon per image.
+                stream = cls.docker_client.api.build(
+                    dockerfile=f"{OLD_VERSION_DIR}/Dockerfile",
+                    path=str(OLD_VERSION_DIR),
+                    tag=tag,
+                    buildargs={
+                        "OPENPORT_VERSION": version.version,
+                        "UBUNTU_VERSION": ubuntu_version,
+                    },
+                )
+
+                for line in stream:
+                    print(line)
 
                     # try:
                     #     container = cls.docker_client.containers.run(
@@ -369,7 +408,7 @@ class OldVersionsTest(TestCase):
         # Upgrading from 1.1.0 is broken regardless of OS; the entry tracks
         # ubuntu_versions[-1] for that version.
         known_issues = [
-            ("1.1.0", "16.04"),
+            ("1.1.0", "18.04"),
         ]
         pool = ThreadPool(processes=20)
         results = []
