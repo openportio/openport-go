@@ -16,6 +16,10 @@ test:
   tags:
     - shell
   timeout: 1h
+  # Let "Auto-cancel redundant pipelines" cancel this job when a newer commit
+  # lands on the same branch (the runner is concurrent=1, so a stale pipeline
+  # blocks the fresh one).
+  interruptible: true
   before_script:
     - rm -rf test-results
     - mkdir -p test-results
@@ -53,6 +57,7 @@ test:
     - shell
   timeout: 30m
   allow_failure: true
+  interruptible: true
   before_script:
     - mkdir -p security-reports
   after_script:
