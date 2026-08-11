@@ -12,5 +12,9 @@ services:
     environment:
       - HOME=/apps/go/
       - GOCACHE=
+      # The module cache lands in the bind-mounted checkout (src/go/pkg/mod);
+      # without this Go marks it read-only and the runner's git clean can't
+      # remove it, breaking every later job on a reused CI instance.
+      - GOFLAGS=-modcacherw
   # // for debugging only
 #      - ./src/:/apps/go/src/
