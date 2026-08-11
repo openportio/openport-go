@@ -15,4 +15,4 @@ RUN chown $UID:$GID /apps/openport -R
 USER $UID:$GID
 
 ADD . /apps/openport
-CMD python -m pytest --junit-xml /test-results/results.xml --ignore tests/old_versions/ tests || true
+CMD python -m pytest --junit-xml /test-results/results.xml --ignore tests/old_versions/ tests

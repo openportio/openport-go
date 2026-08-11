@@ -20,12 +20,22 @@ test:
   # lands on the same branch (the runner is concurrent=1, so a stale pipeline
   # blocks the fresh one).
   interruptible: true
+  variables:
+    # Deterministic compose project name (jenkins.sh honours it) so that
+    # after_script can tear the stack down again. Without this a cancelled
+    # job -- routine now that the pipeline is interruptible -- leaks a
+    # running compose stack with live tunnels that no later cleanup touches:
+    # docker system prune only removes *stopped* containers.
+    PROJECT_NAME: "op-ci-$CI_PIPELINE_ID"
   before_script:
     - rm -rf test-results
     - mkdir -p test-results
   script:
     - ./jenkins.sh
   after_script:
+    # GitLab runs after_script on cancel as well: take down whichever compose
+    # stack (Go or Python tests, same project name) was still running.
+    - docker compose -p "$PROJECT_NAME" down --remove-orphans || true
     # Containers write reports and .pyc caches as root into the bind-mounted
     # source tree. Chown back so the next job's git clean -fdx succeeds.
     - docker run --rm -v "$PWD":/work alpine sh -c "chown -R $(id -u):$(id -g) /work" || true
@@ -77,10 +87,13 @@ test:
 govulncheck:
   extends: .scan_base
   script:
+    # All continuation lines must stay at the same indent: a more-indented
+    # line suppresses YAML folding and leaves "| tee" on a line of its own,
+    # which is a bash syntax error.
     - >
       docker run --rm -v "$PWD":/repo -w /repo/src golang:1.25.7-bookworm
       sh -c "go install golang.org/x/vuln/cmd/govulncheck@latest &&
-             \$(go env GOPATH)/bin/govulncheck ./..."
+      \$(go env GOPATH)/bin/govulncheck ./..."
       | tee security-reports/govulncheck.txt
 
 # Static analysis of first-party code only. src/vendor is excluded: those are
