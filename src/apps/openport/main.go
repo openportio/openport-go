@@ -500,7 +500,7 @@ func run(app *o.App, args []string) {
 
 		if restartOnReboot {
 			restartCommand := args[1:]
-			slices.DeleteFunc(restartCommand, func(s string) bool {
+			restartCommand = slices.DeleteFunc(restartCommand, func(s string) bool {
 				return s == "--automatic-restart" || s == "-a"
 			})
 			app.Session.RestartCommand = strings.Join(restartCommand, " ")
