@@ -72,6 +72,12 @@ func CreateKeys() ([]byte, ssh.Signer, error) {
 		return nil, nil, err
 	}
 	defer privateKeyFile.Close()
+	// OpenFile's mode only applies when the file is being created. Rotating
+	// over a key written by an older client reuses its inode, and those were
+	// created 0644 -- so tighten the permissions explicitly every time.
+	if err := privateKeyFile.Chmod(0600); err != nil {
+		return nil, nil, err
+	}
 	privateKeyPEM := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)}
 	if err := pem.Encode(privateKeyFile, privateKeyPEM); err != nil {
 		return nil, nil, err
