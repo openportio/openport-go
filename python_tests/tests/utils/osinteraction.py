@@ -3,7 +3,7 @@ import os
 import platform
 import sys
 from threading import Thread
-from time import sleep
+from time import sleep, time
 import signal
 
 try:
@@ -118,8 +118,18 @@ class OsInteraction(object):
         t_stdout.daemon = True
         t_stdout.start()
 
-    def get_output(self, p):
-        return self.non_block_read(p)
+    def get_output(self, p, timeout=5):
+        # non_block_read starts the reader threads and does a single short
+        # sleep, so a process that is slow to produce output (e.g. shell=True,
+        # which forks a shell before starting the interpreter) can read back
+        # (False, False) on the first call. Poll until output arrives, the
+        # process exits, or we time out.
+        end = time() + timeout
+        result = self.non_block_read(p)
+        while result == (False, False) and p.poll() is None and time() < end:
+            sleep(0.1)
+            result = self.non_block_read(p)
+        return result
 
     def get_all_output(self, p):
         self.get_output(p)
