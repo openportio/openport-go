@@ -85,6 +85,11 @@ type PortResponse struct {
 type RegisterKeyResponse struct {
 	Status string `json:"status"`
 	Error  string `json:"error"`
+	// Set by servers that understand replaces_public_key ("processed" or
+	// "no-active-key"). Empty means the server ignored the field: Django
+	// drops unknown form fields silently, so without this acknowledgement a
+	// "status: ok" proves nothing about the old key being retired.
+	KeyRotation string `json:"key_rotation"`
 }
 
 type ServerResponseError struct {
@@ -288,41 +293,70 @@ func (app *App) registerKey(keyBindingToken string, name string, proxy string, s
 
 	httpClient := GetHttpClient(proxy)
 	postUrl := fmt.Sprintf("%s/linkKey", server)
-	getParameters := url.Values{
-		"public_key":        {string(publicKey)},
-		"key_binding_token": {keyBindingToken},
-		"key_name":          {name},
-		"client_version":    {VERSION},
-		"platform":          {runtime.GOOS},
+	sendRegistration := func(publicKey []byte, replacesPublicKey []byte) RegisterKeyResponse {
+		getParameters := url.Values{
+			"public_key":        {string(publicKey)},
+			"key_binding_token": {keyBindingToken},
+			"key_name":          {name},
+			"client_version":    {VERSION},
+			"platform":          {runtime.GOOS},
+		}
+		if replacesPublicKey != nil {
+			// Tells the server to retire the key this one replaces, and to move
+			// its reserved ports across. Only honoured within the account the
+			// token belongs to.
+			getParameters["replaces_public_key"] = []string{string(replacesPublicKey)}
+		}
+		log.Debugf("parameters: %s", getParameters)
+		resp, err := httpClient.PostForm(postUrl, getParameters)
+		if err != nil {
+			fail("HTTP error: %s", err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			fail("Body error: %s", err)
+		}
+		log.Debugf("%s", string(body))
+		response := RegisterKeyResponse{}
+		if jsonErr := json.Unmarshal(body, &response); jsonErr != nil {
+			fail("Json Decode error: %s", jsonErr)
+		}
+		return response
 	}
-	if replacesPublicKey != nil {
-		// Tells the server to retire the key this one replaces, and to move
-		// its reserved ports across. Only honoured within the account the
-		// token belongs to.
-		getParameters["replaces_public_key"] = []string{string(replacesPublicKey)}
-	}
-	log.Debugf("parameters: %s", getParameters)
-	resp, err := httpClient.PostForm(postUrl, getParameters)
-	if err != nil {
-		fail("HTTP error: %s", err)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fail("Body error: %s", err)
-	}
-	log.Debugf("%s", string(body))
-	response := RegisterKeyResponse{}
-	jsonErr := json.Unmarshal(body, &response)
-	if jsonErr != nil {
-		fail("Json Decode error: %s", err)
-	}
+
+	response := sendRegistration(publicKey, replacesPublicKey)
 	if response.Status != "ok" {
 		fail("Could not register key: %s", response.Error)
 		app.Stop(EXIT_CODE_KEY_REGISTERED_FAILED)
-	} else {
-		log.Info("key successfully registered")
-		app.Stop(EXIT_CODE_KEY_REGISTERED_OK)
 	}
+
+	// A rotation only happened if the server says it processed
+	// replaces_public_key. Servers that predate the field return "ok" while
+	// ignoring it entirely, which would leave the old key active server-side
+	// as a live credential and the reserved ports behind on it.
+	if replacesPublicKey != nil && response.KeyRotation == "" {
+		restoreKey()
+		if forceRotate {
+			log.Fatalf("The server does not support key rotation yet; your " +
+				"previous key has been restored and nothing was changed. " +
+				"The key sent during this attempt is unused but registered: " +
+				"you can remove it at https://openport.io/user/keys .")
+		}
+		// Plain "register" with a weak key: fall back to registering the
+		// existing key so the command still does what it was asked to do,
+		// and leave rotation for when the server supports it.
+		log.Warnf("The server does not support key rotation; keeping your "+
+			"existing %d-bit key and registering it unchanged. The new key "+
+			"sent during this attempt is unused; you can remove it at "+
+			"https://openport.io/user/keys .", bits)
+		response = sendRegistration(replacesPublicKey, nil)
+		if response.Status != "ok" {
+			log.Fatalf("Could not register key: %s", response.Error)
+		}
+	}
+
+	log.Info("key successfully registered")
+	app.Stop(EXIT_CODE_KEY_REGISTERED_OK)
 }
 
 func SessionIsLive(session db.Session) bool {
@@ -893,19 +927,21 @@ func (app *App) startUDPChannelHandler(sshClient *ssh.Client, session db.Session
 		return
 	}
 
-	// Parse the server's reply to get the public UDP IP
-	udpHost := ""
-	if len(replyData) > 0 {
-		reply := struct {
-			Host string
-			Port uint32
-		}{}
-		if err := ssh.Unmarshal(replyData, &reply); err == nil && reply.Host != "" {
-			udpHost = reply.Host
-		}
+	// ok alone proves nothing: deployed servers ack *every* unknown global
+	// request (the request loop's default branch replies true), so a server
+	// that actually implements udpip-forward must prove it by echoing the
+	// address it is listening on. No payload means an older server that
+	// silently dropped the request -- don't advertise UDP as active.
+	reply := struct {
+		Host string
+		Port uint32
+	}{}
+	if len(replyData) == 0 || ssh.Unmarshal(replyData, &reply) != nil {
+		log.Infof("The server does not support UDP forwarding; only TCP is forwarded on remote port %d.", session.RemotePort)
+		return
 	}
-	if udpHost != "" {
-		log.Infof("UDP forwarding enabled on %s:%d", udpHost, session.RemotePort)
+	if reply.Host != "" {
+		log.Infof("UDP forwarding enabled on %s:%d", reply.Host, session.RemotePort)
 	} else {
 		log.Infof("UDP forwarding enabled on remote port %d", session.RemotePort)
 	}
@@ -987,7 +1023,10 @@ func Connect(key ssh.Signer, session db.Session) (*ssh.Client, chan bool, error)
 			ssh.PublicKeys(key),
 		},
 		HostKeyCallback: hostKeyCallback,
-		Timeout:         time.Duration(session.KeepAliveSeconds) * time.Second,
+		// Only offer algorithms for the key type the API published, so a
+		// server with several host keys presents the one we can verify.
+		HostKeyAlgorithms: utils.HostKeyAlgorithms(session.HostKey),
+		Timeout:           time.Duration(session.KeepAliveSeconds) * time.Second,
 	}
 
 	var sshClient *ssh.Client
