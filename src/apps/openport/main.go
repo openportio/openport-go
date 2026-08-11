@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -499,16 +498,56 @@ func run(app *o.App, args []string) {
 		app.Session.AppManagementPort = controlPort
 
 		if restartOnReboot {
-			restartCommand := args[1:]
-			restartCommand = slices.DeleteFunc(restartCommand, func(s string) bool {
-				return s == "--automatic-restart" || s == "-a"
-			})
+			restartCommand := stripAutomaticRestart(args[1:])
 			app.Session.RestartCommand = strings.Join(restartCommand, " ")
 		}
 		app.InitFiles()
 		app.CreateTunnel()
 	}
 	app.Stop(0)
+}
+
+// stripAutomaticRestart removes every spelling of the hidden
+// --automatic-restart flag from a saved command line. The flag marks the
+// current run as an automatic restart; persisting it would make every
+// restart-sessions replay behave like one.
+//
+// pflag accepts more spellings than the bare tokens: "--automatic-restart=true",
+// the shorthand combined with other flags ("-va"), and the shorthand with a
+// value ("-a=true"). All of them have to go; the other flags in a combined
+// group have to stay.
+func stripAutomaticRestart(args []string) []string {
+	result := make([]string, 0, len(args))
+	for i, arg := range args {
+		if arg == "--" {
+			// Everything after the terminator is positional; keep it as-is.
+			result = append(result, args[i:]...)
+			break
+		}
+		if arg == "--automatic-restart" || strings.HasPrefix(arg, "--automatic-restart=") {
+			continue
+		}
+		if len(arg) > 1 && arg[0] == '-' && arg[1] != '-' {
+			letters, value, hasValue := strings.Cut(arg[1:], "=")
+			if strings.ContainsRune(letters, 'a') {
+				// A "=value" binds to the last shorthand in the group; drop it
+				// only when that was the flag being stripped.
+				if hasValue && strings.HasSuffix(letters, "a") {
+					hasValue = false
+				}
+				letters = strings.ReplaceAll(letters, "a", "")
+				if letters == "" {
+					continue
+				}
+				arg = "-" + letters
+				if hasValue {
+					arg += "=" + value
+				}
+			}
+		}
+		result = append(result, arg)
+	}
+	return result
 }
 
 func myUsage() {
