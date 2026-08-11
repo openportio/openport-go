@@ -40,4 +40,5 @@ ENV GOARM=7
 RUN go mod download
 ENV GOCACHE=/go-cache
 COPY src/ /apps/go/
-RUN --mount=type=cache,target=/go-cache go build -ldflags "-s -w -extldflags=-static" -tags netgo -o /openport-armv7 apps/openport/main.go
+ARG GIT_SHA=unknown
+RUN --mount=type=cache,target=/go-cache go build -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA} -extldflags=-static" -tags netgo -o /openport-armv7 apps/openport/main.go

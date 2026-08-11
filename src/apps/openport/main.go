@@ -2,16 +2,17 @@ package main
 
 import (
 	"fmt"
-	o "github.com/openportio/openport-go"
-	db "github.com/openportio/openport-go/database"
-	"github.com/openportio/openport-go/utils"
-	log "github.com/sirupsen/logrus"
-	flag "github.com/spf13/pflag"
 	"net"
 	"os"
 	"slices"
 	"strconv"
 	"strings"
+
+	o "github.com/openportio/openport-go"
+	db "github.com/openportio/openport-go/database"
+	"github.com/openportio/openport-go/utils"
+	log "github.com/sirupsen/logrus"
+	flag "github.com/spf13/pflag"
 )
 
 func main() {
@@ -104,7 +105,7 @@ func run(app *o.App, args []string) {
 
 	addWSFlags := func(set *flag.FlagSet) {
 		set.BoolVar(&useWS, "ws", false, "Use the websockets protocol instead of ssh.")
-		set.BoolVar(&noSSL, "no-ssl", false, "Connect to the Openport servers without using SSL (only used if the --ws flag is set)")
+		set.BoolVar(&noSSL, "no-ssl", false, "INSECURE: Connect to the Openport servers unencrypted, exposing all tunnelled traffic to the network (only used if the --ws flag is set)")
 
 	}
 	addWSFlags(defaultFlagSet)
@@ -136,6 +137,7 @@ func run(app *o.App, args []string) {
 
 	versionFlagSet := flag.NewFlagSet("version", flag.ExitOnError)
 	addHelpFlag(versionFlagSet)
+	addVerboseFlag(versionFlagSet)
 	flagSets["version"] = versionFlagSet
 
 	killFlagSet := flag.NewFlagSet("kill", flag.ExitOnError)
@@ -244,7 +246,12 @@ func run(app *o.App, args []string) {
 			app.Stop(o.EXIT_CODE_HELP)
 			return
 		}
+		// Build scripts parse this output as the bare version — keep it single-line
+		// unless verbose is asked for.
 		fmt.Println(o.VERSION)
+		if verbose {
+			fmt.Println("git: " + o.GitSha)
+		}
 	case "kill":
 		_ = killFlagSet.Parse(args[2:])
 		app.DbHandler.SetPath(dbPath)

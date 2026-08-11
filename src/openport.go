@@ -36,7 +36,11 @@ import (
 	"time"
 )
 
-const VERSION = "2.2.4-beta"
+// Overridable at build time for release traceability (CRA-COMPLIANCE-PLAN.md item 20):
+//   go build -ldflags "-X github.com/openportio/openport-go.VERSION=x.y.z \
+//                      -X github.com/openportio/openport-go.GitSha=$(git rev-parse --short HEAD)"
+var VERSION = "2.2.4-beta"
+var GitSha = "unknown"
 const USER_CONFIG_FILE = "/etc/openport/users.conf"
 const DEFAULT_SERVER = "https://openport.io"
 
@@ -661,6 +665,11 @@ func (app *App) CreateTunnel() {
 				protocol := "wss"
 				if app.Session.NoSSL {
 					protocol = "ws"
+					log.Warn("**************************************************************************")
+					log.Warn("* --no-ssl is set: the connection to the Openport server is UNENCRYPTED. *")
+					log.Warn("* Anyone on the network path can read and modify the tunnelled traffic.  *")
+					log.Warn("* Remove --no-ssl unless you fully trust the entire network path.        *")
+					log.Warn("**************************************************************************")
 				}
 				primaryServer := fmt.Sprintf("%s://%s/ws", protocol, app.Session.SshServer)
 				fallbackServer := fmt.Sprintf("%s://%s/ws", protocol, app.Session.FallbackSshServerIp)
