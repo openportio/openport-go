@@ -883,7 +883,7 @@ func (app *App) startUDPChannelHandler(sshClient *ssh.Client, session db.Session
 		Port uint32
 	}{Host: "0.0.0.0", Port: uint32(session.RemotePort)})
 
-	ok, replyData, err := sshClient.Conn.SendRequest("udpip-forward", true, payload)
+	ok, _, err := sshClient.Conn.SendRequest("udpip-forward", true, payload)
 	if err != nil {
 		log.Warnf("UDP forwarding not available: %s", err)
 		return
@@ -892,23 +892,7 @@ func (app *App) startUDPChannelHandler(sshClient *ssh.Client, session db.Session
 		log.Warn("UDP forwarding request rejected by server")
 		return
 	}
-
-	// Parse the server's reply to get the public UDP IP
-	udpHost := ""
-	if len(replyData) > 0 {
-		reply := struct {
-			Host string
-			Port uint32
-		}{}
-		if err := ssh.Unmarshal(replyData, &reply); err == nil && reply.Host != "" {
-			udpHost = reply.Host
-		}
-	}
-	if udpHost != "" {
-		log.Infof("UDP forwarding enabled on %s:%d", udpHost, session.RemotePort)
-	} else {
-		log.Infof("UDP forwarding enabled on remote port %d", session.RemotePort)
-	}
+	log.Infof("UDP forwarding enabled on remote port %d", session.RemotePort)
 
 	go func() {
 		for newChannel := range sshClient.HandleChannelOpen("forwarded-udp") {

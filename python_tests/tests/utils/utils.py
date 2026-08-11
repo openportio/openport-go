@@ -785,14 +785,6 @@ def is_ci():
     return os.environ.get("IS_CI", "false").lower() == "true"
 
 
-def get_udp_host_from_output(text):
-    """Extract the UDP host from client output like 'UDP forwarding enabled on <host>:<port>'."""
-    m = re.search(r"UDP forwarding enabled on (\S+):(\d+)", text)
-    if m:
-        return m.group(1)
-    return None
-
-
 class SimpleUdpEchoServer:
     """A UDP server that echoes back received datagrams prefixed with 'echo:'."""
 

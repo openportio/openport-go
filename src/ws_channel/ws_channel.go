@@ -34,10 +34,13 @@ type Channel struct {
 type ChOp byte
 
 const (
-	ChOpUnknown ChOp = 0x00
-	ChOpNew     ChOp = 0x01
-	ChOpCont    ChOp = 0x02
-	ChOpClose   ChOp = 0x03
+	ChOpUnknown  ChOp = 0x00
+	ChOpNew      ChOp = 0x01
+	ChOpCont     ChOp = 0x02
+	ChOpClose    ChOp = 0x03
+	ChOpUdpNew   ChOp = 0x04
+	ChOpUdpCont  ChOp = 0x05
+	ChOpUdpClose ChOp = 0x06
 )
 
 type ChannelError struct {
@@ -75,6 +78,16 @@ func (c *Channel) Close() error {
 
 func (c *Channel) Send(msg []byte) error {
 	newMsg := c.getPayload(ChOpCont, msg)
+	return c.Write(newMsg)
+}
+
+func (c *Channel) SendUdp(msg []byte) error {
+	newMsg := c.getPayload(ChOpUdpCont, msg)
+	return c.Write(newMsg)
+}
+
+func (c *Channel) CloseUdp() error {
+	newMsg := c.getPayload(ChOpUdpClose, []byte(""))
 	return c.Write(newMsg)
 }
 
