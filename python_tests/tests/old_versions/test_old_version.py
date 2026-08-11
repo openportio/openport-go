@@ -56,11 +56,12 @@ LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # Image build behaviour (env OPENPORT_TEST_BUILD):
-#   auto   (default) build only images that do not exist locally
-#   always rebuild everything - needed after changing the Dockerfile, since
-#          "auto" will happily keep using an outdated existing image
+#   always (default) rebuild everything - cheap now that the build context is
+#          small, and always picks up Dockerfile changes
+#   auto   build only images that do not exist locally; keeps using an
+#          outdated existing image after a Dockerfile change
 #   never  fail fast when an image is missing instead of building it
-BUILD_MODE = os.environ.get("OPENPORT_TEST_BUILD", "auto")
+BUILD_MODE = os.environ.get("OPENPORT_TEST_BUILD", "always")
 
 UPGRADE_TIMEOUT = 600  # the upgrade flow installs packages over the tunnel
 
