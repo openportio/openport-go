@@ -2,7 +2,7 @@ import errno
 import os
 import platform
 import sys
-from threading import Thread
+from threading import Lock, Thread
 from time import sleep, time
 import signal
 
@@ -27,6 +27,11 @@ class OsInteraction(object):
             self.logger = get_logger("OsInteraction")
         self.output_queues = {}
         self.all_output = {}
+        # non_block_read can run from several threads at once (e.g. a
+        # print_output_continuously_threaded printer plus a test waiting for
+        # output); the accumulator update below is a read-modify-write, so
+        # without a lock one thread's lines can be lost entirely.
+        self.all_output_lock = Lock()
 
     @staticmethod
     def unset_variable(args, variable):
@@ -131,6 +136,15 @@ class OsInteraction(object):
             result = self.non_block_read(p)
         return result
 
+    def get_accumulated_output(self, p):
+        """(stdout, stderr) of everything the process has written so far,
+        regardless of which thread drained it from the queues. Strings only
+        ever grow, so callers can remember lengths and slice off older text."""
+        self.non_block_read(p)
+        with self.all_output_lock:
+            pair = self.all_output.get(p.pid) or ["", ""]
+            return pair[0], pair[1]
+
     def get_all_output(self, p):
         # Deliberately non-blocking: "all output" means everything accumulated
         # so far. Going through the polling get_output here would block until
@@ -191,14 +205,15 @@ class OsInteraction(object):
 
         new_output = (read_queue(q_stdout), read_queue(q_stderr))
 
-        if process.pid not in self.all_output:
-            self.all_output[process.pid] = ["", ""]
-        for i, new_out in enumerate(new_output):
-            if not new_out:
-                new_out = ""
-            self.all_output[process.pid][i] = os.linesep.join(
-                [self.all_output[process.pid][i], new_out]
-            )
+        with self.all_output_lock:
+            if process.pid not in self.all_output:
+                self.all_output[process.pid] = ["", ""]
+            for i, new_out in enumerate(new_output):
+                if not new_out:
+                    new_out = ""
+                self.all_output[process.pid][i] = os.linesep.join(
+                    [self.all_output[process.pid][i], new_out]
+                )
 
         return new_output
 

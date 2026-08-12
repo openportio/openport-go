@@ -1,3 +1,4 @@
+import weakref
 from signal import SIGINT
 
 import docker.models.containers
@@ -5,6 +6,10 @@ import docker.models.containers
 from tests.utils.logger_service import get_logger
 
 logger = get_logger(__name__)
+
+# How much of each process's accumulated (stdout, stderr) earlier
+# get_remote_host_and_port calls have already matched against; see there.
+_forward_line_cursors = weakref.WeakKeyDictionary()
 
 
 class TimeoutException(Exception):
@@ -383,10 +388,33 @@ def get_remote_host_and_port(
     http_forward=False,
     forward_tunnel=False,
 ):
-    get_log_method = lambda: "".join(i for i in osinteraction.get_output(p) if i)
-    return get_remote_host_and_port__generic(
-        get_log_method, timeout, output_prefix, http_forward, forward_tunnel
-    )
+    # Read via the accumulator, not the live queues: once
+    # print_output_continuously_threaded is running, every queue item goes to
+    # exactly one consumer, so polling get_output here races the printer for
+    # the "Now forwarding" line and loses often enough to fail tests. The
+    # accumulator sees every line no matter which thread drained it. A
+    # per-process cursor, advanced only when a call returns a match, keeps a
+    # reconnect from re-matching the previous session's line without ever
+    # skipping output produced between calls.
+    start_out, start_err = _forward_line_cursors.get(p, (0, 0))
+    logged = ""
+    start = datetime.datetime.now()
+    text = ""
+    while start + datetime.timedelta(seconds=timeout) > datetime.datetime.now():
+        out, err = osinteraction.get_accumulated_output(p)
+        text = out[start_out:] + err[start_err:]
+        if text.strip() and text != logged:
+            new_part = text[len(logged):] if text.startswith(logged) else text
+            logger.info("%s - <<<<<%s>>>>>" % (output_prefix, new_part))
+            logged = text
+        result = get_remote_host_and_port_from_output(
+            text, http_forward, forward_tunnel
+        )
+        if result:
+            _forward_line_cursors[p] = (len(out), len(err))
+            return result
+        sleep(0.1)
+    raise Exception("remote host and port not found in output: {}".format(text))
 
 
 def get_remote_host_and_port__docker(
