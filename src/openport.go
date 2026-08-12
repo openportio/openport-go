@@ -915,7 +915,7 @@ func (app *App) startUDPChannelHandler(sshClient *ssh.Client, session db.Session
 	payload := ssh.Marshal(struct {
 		Host string
 		Port uint32
-	}{Host: "0.0.0.0", Port: uint32(session.RemotePort)})
+	}{Host: "0.0.0.0", Port: uint32(session.RemotePort)}) // #nosec G115 -- a TCP port, 0-65535
 
 	ok, replyData, err := sshClient.Conn.SendRequest("udpip-forward", true, payload)
 	if err != nil {

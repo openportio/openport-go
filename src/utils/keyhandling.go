@@ -170,11 +170,11 @@ func RotateKeys() (oldPublicKey []byte, newPublicKey []byte, restore func(), err
 		if !hadPreviousKey {
 			return
 		}
-		if err := os.WriteFile(OPENPORT_PRIVATE_KEY_PATH, previousPrivate, 0600); err != nil {
+		if err := os.WriteFile(OPENPORT_PRIVATE_KEY_PATH, previousPrivate, 0600); err != nil { // #nosec G703 -- path is OPENPORT_HOME/id_rsa, chosen by the local user, not remote input
 			log.Errorf("Could not restore your previous private key: %s", err)
 			return
 		}
-		if err := os.WriteFile(OPENPORT_PUBLIC_KEY_PATH, previousPublic, 0644); err != nil {
+		if err := os.WriteFile(OPENPORT_PUBLIC_KEY_PATH, previousPublic, 0644); err != nil { // #nosec G703 G306 -- same local path; the public key is deliberately world-readable
 			log.Errorf("Could not restore your previous public key: %s", err)
 			return
 		}

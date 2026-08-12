@@ -53,9 +53,10 @@ test:
 # ---------------------------------------------------------------------------
 # Security scanning (EU Cyber Resilience Act, Annex I Part II)
 #
-# REPORT-ONLY FOR NOW: allow_failure: true on every job, so findings are
-# published as artifacts but do not block. Once the initial backlog is triaged,
-# drop allow_failure so high/critical findings fail the build.
+# ENFORCING: the initial backlog is triaged (false positives carry #nosec
+# annotations with justifications), so these jobs now block the pipeline.
+# govulncheck fails on reachable vulnerabilities, gosec on unannotated
+# high-severity findings, trivy on HIGH/CRITICAL vulns or leaked secrets.
 #
 # This is the client -- the binary end users actually download and run -- so
 # findings here carry more weight than server-side ones.
@@ -66,7 +67,6 @@ test:
   tags:
     - shell
   timeout: 30m
-  allow_failure: true
   interruptible: true
   before_script:
     - mkdir -p security-reports
@@ -104,23 +104,34 @@ govulncheck:
 
 # Static analysis of first-party code only. src/vendor is excluded: those are
 # upstream sources, covered by govulncheck, and scanning them buries our own
-# findings.
+# findings. src/go is a GOPATH the test compose stack drops into the tree;
+# gosec errors out trying to import the module cache in it.
 gosec:
   extends: .scan_base
   script:
+    # Full reports (all severities) as artifacts, never failing.
     - >
       docker run --rm -v "$PWD":/repo -w /repo/src securego/gosec:latest
-      -exclude-dir=vendor
+      -exclude-dir=vendor -exclude-dir=go
       -fmt=json -out=/repo/security-reports/gosec.json -no-fail ./...
     - >
       docker run --rm -v "$PWD":/repo -w /repo/src securego/gosec:latest
-      -exclude-dir=vendor -no-fail ./...
-      | tee security-reports/gosec.txt
+      -exclude-dir=vendor -exclude-dir=go -no-fail
+      -fmt=text -out=/repo/security-reports/gosec.txt ./...
+    # The gate: high-severity findings fail the job. No tee -- a pipe would
+    # make tee's exit code the job status and mask gosec's.
+    - >
+      docker run --rm -v "$PWD":/repo -w /repo/src securego/gosec:latest
+      -exclude-dir=vendor -exclude-dir=go -severity=high ./...
 
 # Filesystem scan for vulnerable dependencies and leaked secrets.
 trivy_fs:
   extends: .scan_base
   script:
+    # Report run first (exit code 0 regardless of findings), then the gate
+    # run with --exit-code 1. The second run hits the cached DB and scan
+    # results, so it is cheap. No tee on the gate -- a pipe would make tee's
+    # exit code the job status and mask trivy's.
     - >
       docker run --rm -v "$PWD":/repo
       -v trivy-cache:/root/.cache/trivy
@@ -130,7 +141,17 @@ trivy_fs:
       --skip-dirs /repo/src/go/pkg
       --skip-dirs "/repo/old exes"
       --no-progress
-      | tee security-reports/trivy-fs.txt
+      --output /repo/security-reports/trivy-fs.txt
+    - >
+      docker run --rm -v "$PWD":/repo
+      -v trivy-cache:/root/.cache/trivy
+      aquasec/trivy:latest fs /repo
+      --scanners vuln,secret
+      --severity HIGH,CRITICAL
+      --skip-dirs /repo/src/go/pkg
+      --skip-dirs "/repo/old exes"
+      --no-progress
+      --exit-code 1
 
 # Software Bill of Materials (CRA Annex I Part II(1)).
 #
