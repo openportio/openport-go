@@ -588,7 +588,18 @@ func (app *App) StartControlServer(controlPort int) int {
 	router.HandleFunc("/exit", app.StopSession)
 	router.HandleFunc("/info", app.InfoRequest)
 	log.Debugf("Listening for control on port %d", controlPort)
-	go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", controlPort), router)
+	server := &http.Server{
+		Addr:              fmt.Sprintf("127.0.0.1:%d", controlPort),
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+	}
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Errorf("Control server stopped: %s", err)
+		}
+	}()
 	return controlPort
 }
 
