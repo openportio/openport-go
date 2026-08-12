@@ -469,9 +469,9 @@ func (app *App) getRestartCommandBasedOnSessionContent(session db.Session, serve
 
 func (app *App) getRestartCommand(session db.Session, server string) []string {
 	restartCommand := strings.Split(session.RestartCommand, " ")
-	if (len(restartCommand) > 1 && restartCommand[1][0] != '-' && restartCommand[0] != "--port") ||
+	if (len(restartCommand) > 1 && len(restartCommand[1]) > 0 && restartCommand[1][0] != '-' && restartCommand[0] != "--port") ||
 		strings.Contains(restartCommand[0], "\n") ||
-		restartCommand[0][0] == 0x80 {
+		(len(restartCommand[0]) > 0 && restartCommand[0][0] == 0x80) {
 		log.Debugf("Migrating from older version: %s", session.RestartCommand)
 		// Python pickle
 		buf := bytes.NewBufferString(session.RestartCommand)
@@ -482,21 +482,30 @@ func (app *App) getRestartCommand(session db.Session, server string) []string {
 			restartCommand = app.getRestartCommandBasedOnSessionContent(session, server)
 		} else {
 			log.Debugf("this is unpickled : <%s>", unpickled)
+			// The pickle comes from the local DB (written by the old Python
+			// client), never from the server -- but a corrupt entry must not
+			// panic the client, so no unchecked type assertions here.
 			restartCommand = []string{}
-			unpickledInterfaces, castWasOk := unpickled.([]interface{})
-			if castWasOk {
-				for _, part := range unpickledInterfaces {
-					restartCommand = append(restartCommand, part.(string))
+			switch unpickledValue := unpickled.(type) {
+			case []interface{}:
+				for _, part := range unpickledValue {
+					if partString, ok := part.(string); ok {
+						restartCommand = append(restartCommand, partString)
+					} else {
+						log.Warnf("Ignoring non-string element in pickled restart command: %v", part)
+					}
 				}
-			} else {
-				unpickledString := unpickled.(string)
-				if unpickledString == "" {
-					restartCommand = app.getRestartCommandBasedOnSessionContent(session, server)
-				} else {
-					restartCommand = []string{unpickledString}
+			case string:
+				if unpickledValue != "" {
+					restartCommand = []string{unpickledValue}
 				}
+			default:
+				log.Warnf("Unexpected pickled restart command type %T", unpickled)
 			}
-			if strings.Contains(restartCommand[0], "openport") {
+			if len(restartCommand) == 0 {
+				restartCommand = app.getRestartCommandBasedOnSessionContent(session, server)
+			}
+			if len(restartCommand) > 0 && strings.Contains(restartCommand[0], "openport") {
 				restartCommand = restartCommand[1:]
 			}
 		}
