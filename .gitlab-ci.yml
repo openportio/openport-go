@@ -91,7 +91,7 @@ govulncheck:
     # line suppresses YAML folding and leaves "| tee" on a line of its own,
     # which is a bash syntax error.
     - >
-      docker run --rm -v "$PWD":/repo -w /repo/src golang:1.25.7-bookworm
+      docker run --rm -v "$PWD":/repo -w /repo/src golang:1.25.12-bookworm
       sh -c "go install golang.org/x/vuln/cmd/govulncheck@latest &&
       \$(go env GOPATH)/bin/govulncheck ./..."
       | tee security-reports/govulncheck.txt
