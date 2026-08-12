@@ -90,11 +90,17 @@ govulncheck:
     # All continuation lines must stay at the same indent: a more-indented
     # line suppresses YAML folding and leaves "| tee" on a line of its own,
     # which is a bash syntax error.
+    #
+    # tee runs *inside* the container and the job exits on PIPESTATUS[0]: a
+    # host-side "| tee" without pipefail made tee's exit code the job status,
+    # so a failing govulncheck still passed (and job 1702 uploaded an empty
+    # artifact).
     - >
       docker run --rm -v "$PWD":/repo -w /repo/src golang:1.25.12-bookworm
-      sh -c "go install golang.org/x/vuln/cmd/govulncheck@latest &&
-      \$(go env GOPATH)/bin/govulncheck ./..."
-      | tee security-reports/govulncheck.txt
+      bash -c "go install golang.org/x/vuln/cmd/govulncheck@latest &&
+      \$(go env GOPATH)/bin/govulncheck ./...
+      | tee /repo/security-reports/govulncheck.txt;
+      exit \${PIPESTATUS[0]}"
 
 # Static analysis of first-party code only. src/vendor is excluded: those are
 # upstream sources, covered by govulncheck, and scanning them buries our own
