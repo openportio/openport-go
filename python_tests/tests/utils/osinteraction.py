@@ -132,7 +132,11 @@ class OsInteraction(object):
         return result
 
     def get_all_output(self, p):
-        self.get_output(p)
+        # Deliberately non-blocking: "all output" means everything accumulated
+        # so far. Going through the polling get_output here would block until
+        # the process produces output, which test_non_block_read__no_output
+        # asserts must not happen.
+        self.non_block_read(p)
 
         if p.pid not in self.all_output:
             return None
