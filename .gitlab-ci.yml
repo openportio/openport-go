@@ -95,9 +95,13 @@ govulncheck:
     # host-side "| tee" without pipefail made tee's exit code the job status,
     # so a failing govulncheck still passed (and job 1702 uploaded an empty
     # artifact).
+    #
+    # govulncheck is pinned: @latest broke the job when x/vuln v1.8.0 started
+    # requiring a newer Go than the image ships (job 4953). The vuln database
+    # is fetched live either way, so pinning the tool loses nothing.
     - >
-      docker run --rm -v "$PWD":/repo -w /repo/src golang:1.25.14-bookworm
-      bash -c "go install golang.org/x/vuln/cmd/govulncheck@latest &&
+      docker run --rm -v "$PWD":/repo -w /repo/src golang:1.26.8-bookworm
+      bash -c "go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 &&
       \$(go env GOPATH)/bin/govulncheck ./...
       | tee /repo/security-reports/govulncheck.txt;
       exit \${PIPESTATUS[0]}"
