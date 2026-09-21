@@ -2,6 +2,8 @@ import logging
 import os
 import shutil
 import signal
+import socket
+import ssl
 import subprocess
 import threading
 import unittest
@@ -1382,8 +1384,34 @@ class AppTests(unittest.TestCase):
                 self.fail("Https forward failed")
             self.assertEqual(actual_response, response.strip())
             logger.info("http portforward ok")
+
+            self.check_legacy_tls_handshake(remote_host)
         finally:
             s.stop()
+
+    def check_legacy_tls_handshake(self, remote_host):
+        # Some legacy embedded clients (Windows Server 2008 R2 era) can only
+        # do TLSv1 with ECDHE-RSA-AES256-CBC-SHA (OpenSSL name:
+        # ECDHE-RSA-AES256-SHA), so the https forward must keep accepting
+        # that handshake.
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1
+        ctx.maximum_version = ssl.TLSVersion.TLSv1
+        # SECLEVEL=0: our own OpenSSL refuses to offer TLSv1 otherwise.
+        ctx.set_ciphers("ECDHE-RSA-AES256-SHA@SECLEVEL=0")
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            with socket.create_connection((remote_host, 443), timeout=10) as sock:
+                with ctx.wrap_socket(sock, server_hostname=remote_host) as tls:
+                    self.assertEqual("TLSv1", tls.version())
+                    self.assertEqual("ECDHE-RSA-AES256-SHA", tls.cipher()[0])
+        except ssl.SSLError as e:
+            self.fail(
+                "https forward refused a TLSv1 + ECDHE-RSA-AES256-CBC-SHA "
+                "handshake (legacy device compatibility): %s" % e
+            )
+        logger.info("legacy TLSv1 handshake ok")
 
     def kill_manager(self, manager_port):
         url = "http://localhost:%s/exit" % manager_port
