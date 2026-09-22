@@ -1,0 +1,27 @@
+# Restarts the openport sessions that were marked with --restart-on-reboot.
+#
+# "openport restart-sessions" spawns one child process per session and exits.
+# The children stay in this unit's cgroup, so:
+#   - RemainAfterExit=yes keeps the unit active, otherwise systemd would
+#     clean up the cgroup (killing the sessions) as soon as ExecStart returns.
+#   - "systemctl restart openport" stops every running session and re-spawns
+#     them from the database -- that is how a package upgrade moves live
+#     tunnels onto the new binary (see packaging/scripts/postinstall.sh).
+#
+# This native unit intentionally shares the name of the sysv init script that
+# pre-2.2.4 debs shipped (/etc/init.d/openport): systemd prefers the native
+# unit, so the leftover conffile on upgraded machines is ignored.
+
+[Unit]
+Description=Openport - restart tunnels marked restart-on-reboot
+Documentation=https://openport.readthedocs.io
+After=network-online.target nss-user-lookup.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/openport restart-sessions
+
+[Install]
+WantedBy=multi-user.target

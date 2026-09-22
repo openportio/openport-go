@@ -63,7 +63,9 @@ RUN go mod download
 ENV GOCACHE=/go-cache
 COPY src/ /apps/go/
 ARG GIT_SHA=unknown
-RUN --mount=type=cache,target=/go-cache go build -o /openport-windows-amd64.exe -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA} -extldflags=-static" apps/openport/main.go
-RUN --mount=type=cache,target=/go-cache go build -o /openportw-windows-amd64.exe -ldflags "-H=windowsgui -s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA} -extldflags=-static" apps/openport/main.go
+# Release version (e.g. 2.2.4); empty keeps the VERSION var compiled into the source.
+ARG VERSION=
+RUN --mount=type=cache,target=/go-cache go build -o /openport-windows-amd64.exe -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION} -extldflags=-static" apps/openport/main.go
+RUN --mount=type=cache,target=/go-cache go build -o /openportw-windows-amd64.exe -ldflags "-H=windowsgui -s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION} -extldflags=-static" apps/openport/main.go
 RUN #go build -o openport-service-windows-amd64 -ldflags -H=windowsgui apps/windows_service/main.go
-RUN --mount=type=cache,target=/go-cache go build -o /openport-service-windows-amd64.exe -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA} -extldflags=-static" apps/windows_service/main.go
+RUN --mount=type=cache,target=/go-cache go build -o /openport-service-windows-amd64.exe -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION} -extldflags=-static" apps/windows_service/main.go
