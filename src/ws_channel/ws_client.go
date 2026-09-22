@@ -173,7 +173,11 @@ func (client *WSClient) StartReverseTunnel(session database.Session, successCall
 		return err
 	}
 	successCallback()
-	client.ForwardPort(session.LocalPort)
+	localPort := session.LocalPort
+	if session.TlsProxyPort != 0 {
+		localPort = session.TlsProxyPort
+	}
+	client.ForwardPort(localPort)
 	return nil
 
 }

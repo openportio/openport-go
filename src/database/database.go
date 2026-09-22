@@ -2,6 +2,7 @@ package database
 
 import (
 	"errors"
+	"fmt"
 	"github.com/jinzhu/gorm"
 	"path"
 )
@@ -28,6 +29,17 @@ type Session struct {
 	HttpForward        bool
 	HttpForwardAddress string
 
+	// TLS passthrough: the server routes the forward's TLS bytes through
+	// untouched and this client terminates them with the cert below.
+	TlsPassthrough bool `sql:"default:false"`
+	CustomDomain   string
+	TlsCertPath    string
+	TlsKeyPath     string
+	AcmeDirectory  string
+	// Local port of the in-process TLS terminator; the tunnel dials it
+	// instead of LocalPort while passthrough is active.
+	TlsProxyPort int `gorm:"-"`
+
 	AppManagementPort   int
 	OpenPortForIpLink   string
 	UseIpLinkProtection string
@@ -51,8 +63,24 @@ type Session struct {
 	Connected bool
 }
 
+// TunnelDialAddress is the local address incoming tunnel connections are
+// proxied to: the in-process TLS terminator when passthrough is active,
+// the forwarded service itself otherwise.
+func (s Session) TunnelDialAddress() string {
+	if s.TlsProxyPort != 0 {
+		return fmt.Sprintf("127.0.0.1:%d", s.TlsProxyPort)
+	}
+	return fmt.Sprintf("localhost:%d", s.LocalPort)
+}
+
 func (s Session) PrintMessage(message string) {
-	if s.HttpForward {
+	if s.TlsPassthrough {
+		address := s.HttpForwardAddress
+		if s.CustomDomain != "" {
+			address = s.CustomDomain
+		}
+		log.Infof("Now forwarding https://%s to localhost:%d (TLS terminates on this machine)", address, s.LocalPort)
+	} else if s.HttpForward {
 		log.Infof("Now forwarding remote address %s to localhost", s.HttpForwardAddress)
 	} else {
 		log.Infof("Now forwarding remote port %s:%d to localhost:%d", s.SshServer, s.RemotePort, s.LocalPort)

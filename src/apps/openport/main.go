@@ -96,6 +96,18 @@ func run(app *o.App, args []string) {
 
 	httpForward := defaultFlagSet.Bool("http-forward", false, "Request an http forward, so you can connect to port 80 on the server.")
 
+	tlsPassthrough := defaultFlagSet.Bool("tls-passthrough", false,
+		"Terminate TLS on this machine instead of on the openport servers, so the tunnelled "+
+			"traffic stays encrypted end-to-end. Certificates come from Let's Encrypt unless "+
+			"--tls-cert and --tls-key are given. Implies --http-forward.")
+	customDomain := defaultFlagSet.String("domain", "",
+		"Your own domain for the tls-passthrough forward. Create a CNAME record pointing it to "+
+			"your forwarding address first.")
+	tlsCertPath := defaultFlagSet.String("tls-cert", "", "Path to the PEM certificate (chain) served for the tls-passthrough forward.")
+	tlsKeyPath := defaultFlagSet.String("tls-key", "", "Path to the PEM private key for --tls-cert.")
+	acmeDirectory := defaultFlagSet.String("acme-directory", "",
+		"(testing) Alternative ACME directory URL for the tls-passthrough certificates.")
+
 	addRequestServerFlag := func(set *flag.FlagSet) {
 		set.StringVar(&sshServer, "request-server", "", "The requested tunnel server")
 		utils.FailOnError(set.MarkHidden("request-server"), "")
@@ -474,6 +486,16 @@ func run(app *o.App, args []string) {
 			}
 		}
 
+		if *customDomain != "" && !*tlsPassthrough {
+			log.Fatal("--domain requires --tls-passthrough")
+		}
+		if *tlsPassthrough {
+			if (*tlsCertPath == "") != (*tlsKeyPath == "") {
+				log.Fatal("--tls-cert and --tls-key must be given together")
+			}
+			*httpForward = true
+		}
+
 		if daemonize {
 			app.StartDaemon(args)
 			return
@@ -483,6 +505,11 @@ func run(app *o.App, args []string) {
 			LocalPort:           port,
 			UseIpLinkProtection: useIpLinkProtection,
 			HttpForward:         *httpForward,
+			TlsPassthrough:      *tlsPassthrough,
+			CustomDomain:        *customDomain,
+			TlsCertPath:         *tlsCertPath,
+			TlsKeyPath:          *tlsKeyPath,
+			AcmeDirectory:       *acmeDirectory,
 			Server:              server,
 			KeepAliveSeconds:    keepAliveSeconds,
 			Proxy:               socksProxy,
