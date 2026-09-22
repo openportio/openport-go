@@ -110,6 +110,19 @@ type App struct {
 	ExitOnFailureTimeout int
 	Connected            chan bool
 	ConnectedState       ConnectionState
+
+	// Custom-domain TLS passthrough orchestration. wantPassthrough/wantDomain
+	// are what the user asked for; the effective per-connection mode is
+	// decided in applyCustomDomainMode based on whether the domain currently
+	// routes to our forwarding address. See custom_domain.go.
+	mu                    sync.Mutex
+	interruptCurrent      func() // ends the current tunnel so the loop reconnects
+	tlsProxyPort          int    // the running TLS terminator's local port
+	wantPassthrough       bool
+	wantDomain            string
+	passthroughLatched    bool // once true, stay in passthrough across reconnects
+	domainGuidancePrinted bool
+	domainPollerStarted   bool
 }
 
 func CreateApp() *App {
@@ -702,15 +715,16 @@ func (app *App) CreateTunnel() {
 	}
 	defer app.DbHandler.SetInactive(&app.Session)
 
-	if app.Session.TlsPassthrough {
-		if err := app.StartTLSTerminator(&app.Session); err != nil {
-			log.Fatalf("%s", err)
-		}
-	}
+	// Remember what the user asked for; the effective mode per connection is
+	// decided in applyCustomDomainMode (it may start as plain http-forward
+	// while we wait for the domain's CNAME to point at us, then upgrade).
+	app.wantPassthrough = app.Session.TlsPassthrough
+	app.wantDomain = app.Session.CustomDomain
 
 	go app.ConnectedState.DoState()
 
 	for {
+		app.applyCustomDomainMode()
 		response, err2 := app.RequestPortForward(&app.Session, publicKey)
 		if err2 != nil {
 			log.Error(err2)
@@ -747,7 +761,9 @@ func (app *App) CreateTunnel() {
 						app.Session.PrintMessage(response.Message)
 						app.MarkConnected()
 					}
+					app.setInterrupt(func() { wsClient.Close() })
 					err = wsClient.StartReverseTunnel(app.Session, callback)
+					app.clearInterrupt()
 				}
 			} else {
 				err = app.StartReverseTunnel(key, app.Session, response.Message)
@@ -922,6 +938,11 @@ func (app *App) StartReverseTunnel(key ssh.Signer, session db.Session, message s
 	}
 	stopFuncRef := app.StopHooks.PushBack(stopFunc)
 	defer app.StopHooks.Remove(stopFuncRef)
+
+	// Let the custom-domain poller end just this connection (so the loop
+	// reconnects and upgrades to passthrough) without stopping the app.
+	app.setInterrupt(func() { sshClient.Close(); listener.Close() })
+	defer app.clearInterrupt()
 
 	// Also set up UDP forwarding on the same port, over the same SSH connection
 	app.startUDPChannelHandler(sshClient, session)
