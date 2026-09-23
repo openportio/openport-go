@@ -102,12 +102,17 @@ func terminate(raw net.Conn, config *tls.Config, localAddress string) {
 		tlsConn.Close()
 		return
 	}
+	// Both goroutines close both ends: whichever side disconnects first,
+	// the copy in the other direction gets unblocked instead of sitting on
+	// a keep-alive socket forever (one fd + goroutine per client visit).
 	go func() {
 		defer tlsConn.Close()
 		defer target.Close()
 		io.Copy(tlsConn, target)
 	}()
 	go func() {
+		defer tlsConn.Close()
+		defer target.Close()
 		io.Copy(target, tlsConn)
 	}()
 }
@@ -159,7 +164,7 @@ func terminatorTLSConfig(session *db.Session) (*tls.Config, error) {
 			// The decrypted bytes are copied to the service as-is, so only
 			// HTTP/1.1 may be negotiated: h2 frames would be garbage to it.
 			NextProtos: []string{"http/1.1"},
-			MinVersion: tls.VersionTLS12,
+			MinVersion: legacyMinTLSVersion, // #nosec G402 -- see legacyMinTLSVersion
 		}, nil
 	}
 
@@ -184,30 +189,28 @@ func terminatorTLSConfig(session *db.Session) (*tls.Config, error) {
 	return &tls.Config{
 		GetCertificate: manager.GetCertificate,
 		NextProtos:     []string{"http/1.1", acme.ALPNProto},
-		MinVersion:     tls.VersionTLS12,
+		MinVersion:     legacyMinTLSVersion, // #nosec G402 -- see legacyMinTLSVersion
 	}, nil
 }
 
+// The server-terminated forwards accept TLSv1 with CBC suites because
+// deployed embedded devices still speak nothing newer; passthrough moves the
+// termination here, so it must not silently cut those devices off.
+const legacyMinTLSVersion = tls.VersionTLS10 // #nosec G402 -- deliberate parity with the server-side forwards
+
+// checkTerminatorHost restricts autocert issuance to the user's own domain.
+// The <xxxxx>.u.openport.io forwarding address (and its .xyz sibling) also
+// routes to this terminator while the domain is latched, but issuing for it
+// would draw from the openport.io per-domain Let's Encrypt rate limit that
+// the servers' wildcard renewals depend on -- the very reason main.go
+// refuses --tls-passthrough without --domain. A visitor using the
+// forwarding address gets a failed handshake instead of a certificate.
 func checkTerminatorHost(session *db.Session, host string) error {
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	for _, allowed := range []string{session.CustomDomain, session.HttpForwardAddress, siblingTLD(session.HttpForwardAddress)} {
-		if allowed != "" && host == strings.ToLower(allowed) {
-			return nil
-		}
+	if session.CustomDomain != "" && host == strings.ToLower(session.CustomDomain) {
+		return nil
 	}
-	return fmt.Errorf("host %q is not this session's domain or forwarding address", host)
-}
-
-// siblingTLD maps a forwarding address between the .io and .xyz spellings,
-// which both reach the same session.
-func siblingTLD(address string) string {
-	if strings.HasSuffix(address, ".io") {
-		return strings.TrimSuffix(address, ".io") + ".xyz"
-	}
-	if strings.HasSuffix(address, ".xyz") {
-		return strings.TrimSuffix(address, ".xyz") + ".io"
-	}
-	return ""
+	return fmt.Errorf("host %q is not this session's custom domain", host)
 }
 
 func acmeClientForDirectory(directory string) (*acme.Client, error) {
