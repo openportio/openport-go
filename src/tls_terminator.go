@@ -213,7 +213,7 @@ func siblingTLD(address string) string {
 func acmeClientForDirectory(directory string) (*acme.Client, error) {
 	client := &acme.Client{DirectoryURL: directory}
 	if caFile := os.Getenv(ACME_CA_FILE_ENV); caFile != "" {
-		pem, err := os.ReadFile(caFile)
+		pem, err := os.ReadFile(caFile) // #nosec G703 -- operator-set env var naming a local file, read as the same user; testing hook, not remote input
 		if err != nil {
 			return nil, fmt.Errorf("could not read %s: %w", ACME_CA_FILE_ENV, err)
 		}
