@@ -3,6 +3,7 @@ package openport
 import (
 	"context"
 	"net"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -24,41 +25,89 @@ import (
 
 const domainPollInterval = 20 * time.Second
 
+// tlsPassthroughHandler owns all the passthrough orchestration state: what
+// the user asked for (want*), the per-process upgrade latch, the running
+// terminator, and the hook the DNS poller uses to end the current
+// connection. The zero value is a no-op for sessions without passthrough.
+type tlsPassthroughHandler struct {
+	wantPassthrough bool
+	wantDomain      string
+
+	// once true, stay in passthrough across reconnects. Deliberately not
+	// persisted: a fresh process re-verifies DNS once, so a removed CNAME
+	// degrades to the waiting mode instead of a fatal loop.
+	latched bool
+
+	// local port of the running TLS terminator, so mode toggles between
+	// connections do not start a second listener (Session.TlsProxyPort is
+	// the per-connection dial target, 0 while serving plain http-forward).
+	terminatorPort int
+
+	pollerStarted bool
+
+	// mu guards the two fields shared with the poller goroutine.
+	mu               sync.Mutex
+	interruptCurrent func() // ends the current tunnel so the loop reconnects
+	guidancePrinted  bool
+}
+
+func (h *tlsPassthroughHandler) setInterrupt(fn func()) {
+	h.mu.Lock()
+	h.interruptCurrent = fn
+	h.mu.Unlock()
+}
+
+func (h *tlsPassthroughHandler) clearInterrupt() {
+	h.mu.Lock()
+	h.interruptCurrent = nil
+	h.mu.Unlock()
+}
+
+func (h *tlsPassthroughHandler) callInterrupt() {
+	h.mu.Lock()
+	fn := h.interruptCurrent
+	h.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
 // applyCustomDomainMode sets the effective per-connection passthrough fields
 // on app.Session before a port request. Call it at the top of each loop
 // iteration.
 func (app *App) applyCustomDomainMode() {
-	if !app.wantPassthrough {
+	h := &app.passthrough
+	if !h.wantPassthrough {
 		return
 	}
 
 	effective := false
 	switch {
-	case app.wantDomain == "":
-		// Passthrough without a custom domain (e.g. --tls-cert on the
-		// openport address); nothing to wait for.
+	case h.wantDomain == "":
+		// Passthrough without a custom domain (--tls-cert on the openport
+		// address); nothing to wait for.
 		effective = true
-	case app.passthroughLatched:
+	case h.latched:
 		effective = true
 	default:
 		addr := app.Session.HttpForwardAddress
-		if addr != "" && domainRoutable(app.wantDomain, addr) {
+		if addr != "" && domainRoutable(h.wantDomain, addr) {
 			effective = true
-			app.passthroughLatched = true
-			log.Infof("Custom domain %s points at %s; enabling end-to-end encryption.", app.wantDomain, addr)
+			h.latched = true
+			log.Infof("Custom domain %s points at %s; enabling end-to-end encryption.", h.wantDomain, addr)
 		}
 	}
 
 	if effective {
 		app.Session.TlsPassthrough = true
-		app.Session.CustomDomain = app.wantDomain
-		if app.tlsProxyPort == 0 {
+		app.Session.CustomDomain = h.wantDomain
+		if h.terminatorPort == 0 {
 			if err := app.StartTLSTerminator(&app.Session); err != nil {
 				log.Fatalf("%s", err)
 			}
-			app.tlsProxyPort = app.Session.TlsProxyPort
+			h.terminatorPort = app.Session.TlsProxyPort
 		}
-		app.Session.TlsProxyPort = app.tlsProxyPort
+		app.Session.TlsProxyPort = h.terminatorPort
 		return
 	}
 
@@ -71,27 +120,28 @@ func (app *App) applyCustomDomainMode() {
 }
 
 func (app *App) maybePrintDomainGuidance() {
+	h := &app.passthrough
 	addr := app.Session.HttpForwardAddress
 	if addr == "" {
 		return
 	}
-	app.mu.Lock()
-	if app.domainGuidancePrinted {
-		app.mu.Unlock()
+	h.mu.Lock()
+	if h.guidancePrinted {
+		h.mu.Unlock()
 		return
 	}
-	app.domainGuidancePrinted = true
-	app.mu.Unlock()
+	h.guidancePrinted = true
+	h.mu.Unlock()
 	log.Infof("-----------------------------------------------------------------")
-	log.Infof("To serve https://%s with end-to-end encryption, create a CNAME", app.wantDomain)
+	log.Infof("To serve https://%s with end-to-end encryption, create a CNAME", h.wantDomain)
 	log.Infof("record at your DNS provider. In most provider dashboards:")
 	log.Infof("    Type:          CNAME")
-	log.Infof("    Name/Host:     the subdomain part of %s", app.wantDomain)
+	log.Infof("    Name/Host:     the subdomain part of %s", h.wantDomain)
 	log.Infof("                   (some providers want the full name; no trailing dot)")
 	log.Infof("    Value/Target:  %s", addr)
 	log.Infof("    TTL:           any (300 is fine)")
 	log.Infof("Or, as a raw zone file entry:")
-	log.Infof("    %s.   CNAME   %s.", app.wantDomain, addr)
+	log.Infof("    %s.   CNAME   %s.", h.wantDomain, addr)
 	log.Infof("No restart needed: this switches over automatically within a")
 	log.Infof("minute of the record propagating. Until then, your service stays")
 	log.Infof("reachable on https://%s .", addr)
@@ -101,10 +151,11 @@ func (app *App) maybePrintDomainGuidance() {
 // ensureDomainPoller starts (once) a goroutine that ends the current
 // connection when the custom domain becomes routable, so the loop upgrades.
 func (app *App) ensureDomainPoller() {
-	if app.domainPollerStarted || app.wantDomain == "" {
+	h := &app.passthrough
+	if h.pollerStarted || h.wantDomain == "" {
 		return
 	}
-	app.domainPollerStarted = true
+	h.pollerStarted = true
 	go func() {
 		for {
 			// Print the CNAME instructions as soon as the address is known
@@ -112,38 +163,17 @@ func (app *App) ensureDomainPoller() {
 			// cannot do it while we wait here).
 			app.maybePrintDomainGuidance()
 			time.Sleep(domainPollInterval)
-			if app.Stopped || app.passthroughLatched {
+			if app.Stopped || h.latched {
 				return
 			}
 			addr := app.Session.HttpForwardAddress
-			if addr != "" && domainRoutable(app.wantDomain, addr) {
-				log.Infof("Detected %s -> %s. Reconnecting to enable end-to-end encryption...", app.wantDomain, addr)
-				app.callInterrupt()
+			if addr != "" && domainRoutable(h.wantDomain, addr) {
+				log.Infof("Detected %s -> %s. Reconnecting to enable end-to-end encryption...", h.wantDomain, addr)
+				h.callInterrupt()
 				return
 			}
 		}
 	}()
-}
-
-func (app *App) setInterrupt(fn func()) {
-	app.mu.Lock()
-	app.interruptCurrent = fn
-	app.mu.Unlock()
-}
-
-func (app *App) clearInterrupt() {
-	app.mu.Lock()
-	app.interruptCurrent = nil
-	app.mu.Unlock()
-}
-
-func (app *App) callInterrupt() {
-	app.mu.Lock()
-	fn := app.interruptCurrent
-	app.mu.Unlock()
-	if fn != nil {
-		fn()
-	}
 }
 
 // domainRoutable reports whether domain currently resolves to the same host
