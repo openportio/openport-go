@@ -290,3 +290,20 @@ func TestStripAutomaticRestart(t *testing.T) {
 		assert.Equal(t, c.want, stripAutomaticRestart(c.in), c.name)
 	}
 }
+
+func TestRewriteFlagValue(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"separate value", []string{"8080", "--tls-cert", "cert.pem"}, []string{"8080", "--tls-cert", "/abs/cert.pem"}},
+		{"equals value", []string{"8080", "--tls-cert=cert.pem"}, []string{"8080", "--tls-cert=/abs/cert.pem"}},
+		{"flag absent", []string{"8080", "-v"}, []string{"8080", "-v"}},
+		{"kept after terminator", []string{"8080", "--", "--tls-cert", "cert.pem"}, []string{"8080", "--", "--tls-cert", "cert.pem"}},
+		{"prefix of another flag untouched", []string{"8080", "--tls-cert-x", "y"}, []string{"8080", "--tls-cert-x", "y"}},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, rewriteFlagValue(c.in, "--tls-cert", "/abs/cert.pem"), c.name)
+	}
+}
