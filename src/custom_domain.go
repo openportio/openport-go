@@ -2,6 +2,7 @@ package openport
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
 	"time"
@@ -30,24 +31,31 @@ const domainPollInterval = 20 * time.Second
 // terminator, and the hook the DNS poller uses to end the current
 // connection. The zero value is a no-op for sessions without passthrough.
 type tlsPassthroughHandler struct {
+	// Written once before the connection loop starts, read-only after.
 	wantPassthrough bool
 	wantDomain      string
+
+	// local port of the running TLS terminator, so mode toggles between
+	// connections do not start a second listener (Session.TlsProxyPort is
+	// the per-connection dial target, 0 while serving plain http-forward).
+	// Main loop only.
+	terminatorPort int
+
+	// mu guards every field below: they are shared with the poller goroutine.
+	mu sync.Mutex
 
 	// once true, stay in passthrough across reconnects. Deliberately not
 	// persisted: a fresh process re-verifies DNS once, so a removed CNAME
 	// degrades to the waiting mode instead of a fatal loop.
 	latched bool
 
-	// local port of the running TLS terminator, so mode toggles between
-	// connections do not start a second listener (Session.TlsProxyPort is
-	// the per-connection dial target, 0 while serving plain http-forward).
-	terminatorPort int
+	// snapshot of Session.HttpForwardAddress for the poller; the Session
+	// itself belongs to the main loop.
+	forwardAddress string
 
-	pollerStarted bool
-
-	// mu guards the two fields shared with the poller goroutine.
-	mu               sync.Mutex
-	interruptCurrent func() // ends the current tunnel so the loop reconnects
+	pollerRunning    bool
+	interruptCurrent func()        // ends the current tunnel so the loop reconnects
+	done             chan struct{} // closed when the app stops
 	guidancePrinted  bool
 }
 
@@ -81,19 +89,26 @@ func (app *App) applyCustomDomainMode() {
 		return
 	}
 
+	h.mu.Lock()
+	h.forwardAddress = app.Session.HttpForwardAddress
+	latched := h.latched
+	h.mu.Unlock()
+
 	effective := false
 	switch {
 	case h.wantDomain == "":
 		// Passthrough without a custom domain (--tls-cert on the openport
 		// address); nothing to wait for.
 		effective = true
-	case h.latched:
+	case latched:
 		effective = true
 	default:
 		addr := app.Session.HttpForwardAddress
 		if addr != "" && domainRoutable(h.wantDomain, addr) {
 			effective = true
+			h.mu.Lock()
 			h.latched = true
+			h.mu.Unlock()
 			log.Infof("Custom domain %s points at %s; enabling end-to-end encryption.", h.wantDomain, addr)
 		}
 	}
@@ -121,12 +136,9 @@ func (app *App) applyCustomDomainMode() {
 
 func (app *App) maybePrintDomainGuidance() {
 	h := &app.passthrough
-	addr := app.Session.HttpForwardAddress
-	if addr == "" {
-		return
-	}
 	h.mu.Lock()
-	if h.guidancePrinted {
+	addr := h.forwardAddress
+	if addr == "" || h.guidancePrinted {
 		h.mu.Unlock()
 		return
 	}
@@ -148,25 +160,51 @@ func (app *App) maybePrintDomainGuidance() {
 	log.Infof("-----------------------------------------------------------------")
 }
 
-// ensureDomainPoller starts (once) a goroutine that ends the current
-// connection when the custom domain becomes routable, so the loop upgrades.
+// ensureDomainPoller starts a goroutine that ends the current connection
+// when the custom domain becomes routable, so the loop upgrades. The poller
+// exits after firing (or on latch/stop); it is restarted here if a later
+// loop iteration is back in waiting mode -- e.g. the interrupt fired between
+// connections, or a reconnect's DNS check transiently failed -- so a session
+// that can stay up for weeks is never stranded in server-terminated mode.
 func (app *App) ensureDomainPoller() {
 	h := &app.passthrough
-	if h.pollerStarted || h.wantDomain == "" {
+	if h.wantDomain == "" {
 		return
 	}
-	h.pollerStarted = true
+	h.mu.Lock()
+	if h.pollerRunning {
+		h.mu.Unlock()
+		return
+	}
+	h.pollerRunning = true
+	if h.done == nil {
+		h.done = make(chan struct{})
+		app.StopHooks.PushBack(func() { close(h.done) })
+	}
+	h.mu.Unlock()
 	go func() {
+		defer func() {
+			h.mu.Lock()
+			h.pollerRunning = false
+			h.mu.Unlock()
+		}()
 		for {
 			// Print the CNAME instructions as soon as the address is known
 			// (the main loop is blocked in the connected tunnel, so it
 			// cannot do it while we wait here).
 			app.maybePrintDomainGuidance()
-			time.Sleep(domainPollInterval)
-			if app.Stopped || h.latched {
+			select {
+			case <-h.done:
+				return
+			case <-time.After(domainPollInterval):
+			}
+			h.mu.Lock()
+			latched := h.latched
+			addr := h.forwardAddress
+			h.mu.Unlock()
+			if latched {
 				return
 			}
-			addr := app.Session.HttpForwardAddress
 			if addr != "" && domainRoutable(h.wantDomain, addr) {
 				log.Infof("Detected %s -> %s. Reconnecting to enable end-to-end encryption...", h.wantDomain, addr)
 				h.callInterrupt()
@@ -193,38 +231,51 @@ func domainRoutable(domain, address string) bool {
 	return false
 }
 
-// probeResolver queries a public resolver directly instead of the local one.
-// The readiness poll runs before the user has created their CNAME, and a
-// local resolver (e.g. systemd-resolved) would cache that NXDOMAIN for the
+// The probe resolvers query public resolvers directly instead of the local
+// one. The readiness poll runs before the user has created their CNAME, and
+// a local resolver (e.g. systemd-resolved) would cache that NXDOMAIN for the
 // zone's SOA minimum -- often hours -- so the poll would keep seeing the
 // stale negative long after the record exists. Public resolvers cap negative
 // caching to minutes, so the switch happens promptly once the CNAME is up.
-var probeResolver = &net.Resolver{
-	PreferGo: true,
-	Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-		d := net.Dialer{Timeout: 5 * time.Second}
-		if c, err := d.DialContext(ctx, network, "1.1.1.1:53"); err == nil {
-			return c, nil
-		}
-		return d.DialContext(ctx, network, "8.8.8.8:53")
-	},
+//
+// They are tried in order, each with its own timeout: a UDP dial "succeeds"
+// even on a network that blackholes the resolver, so a dial-level fallback
+// would never fire. The local resolver comes last, for networks that block
+// outbound DNS to public resolvers entirely.
+var probeResolvers = []*net.Resolver{
+	publicResolver("1.1.1.1:53"),
+	publicResolver("8.8.8.8:53"),
+	net.DefaultResolver,
+}
+
+func publicResolver(address string) *net.Resolver {
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 3 * time.Second}
+			return d.DialContext(ctx, network, address)
+		},
+	}
 }
 
 func lookupIPSet(host string) map[string]bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-	ips, err := probeResolver.LookupHost(ctx, host)
-	if err != nil {
-		// A network that blocks outbound DNS to public resolvers still has
-		// the local one; fall back so the check works there too.
-		ips, err = net.LookupHost(host)
-		if err != nil {
+	for _, resolver := range probeResolvers {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ips, err := resolver.LookupHost(ctx, host)
+		cancel()
+		if err == nil {
+			set := make(map[string]bool, len(ips))
+			for _, ip := range ips {
+				set[ip] = true
+			}
+			return set
+		}
+		var dnsErr *net.DNSError
+		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+			// An authoritative "no such name": the CNAME is simply not
+			// there yet. Asking the next resolver would only slow the poll.
 			return nil
 		}
 	}
-	set := make(map[string]bool, len(ips))
-	for _, ip := range ips {
-		set[ip] = true
-	}
-	return set
+	return nil
 }
