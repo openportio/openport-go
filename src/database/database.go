@@ -36,6 +36,10 @@ type Session struct {
 	TlsCertPath    string
 	TlsKeyPath     string
 	AcmeDirectory  string
+	// The local service terminates TLS itself; the client only relays the
+	// encrypted bytes (optionally passing the PROXY header through).
+	LocalTLS           bool `sql:"default:false"`
+	LocalProxyProtocol bool `sql:"default:false"`
 	// Local port of the in-process TLS terminator; the tunnel dials it
 	// instead of LocalPort while passthrough is active.
 	TlsProxyPort int `gorm:"-"`
@@ -79,7 +83,11 @@ func (s Session) PrintMessage(message string) {
 		if s.CustomDomain != "" {
 			address = s.CustomDomain
 		}
-		log.Infof("Now forwarding https://%s to localhost:%d (TLS terminates on this machine)", address, s.LocalPort)
+		if s.LocalTLS {
+			log.Infof("Now forwarding https://%s to localhost:%d (end-to-end TLS; your local service holds the certificate)", address, s.LocalPort)
+		} else {
+			log.Infof("Now forwarding https://%s to localhost:%d (TLS terminates on this machine)", address, s.LocalPort)
+		}
 	} else if s.HttpForward {
 		log.Infof("Now forwarding remote address %s to localhost", s.HttpForwardAddress)
 	} else {

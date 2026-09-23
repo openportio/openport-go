@@ -65,6 +65,67 @@ func (app *App) StartTLSTerminator(session *db.Session) error {
 	return nil
 }
 
+// StartTLSRelay serves --local-tls: the local service terminates TLS itself,
+// so this only bridges tunnel connections to it, stripping the PROXY
+// protocol header the server prepends (or passing it through untouched when
+// the local service is configured to read it).
+func (app *App) StartTLSRelay(session *db.Session) error {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	session.TlsProxyPort = listener.Addr().(*net.TCPAddr).Port
+	log.Debugf("TLS relay listening on 127.0.0.1:%d", session.TlsProxyPort)
+
+	app.StopHooks.PushBack(func() { listener.Close() })
+
+	localAddress := fmt.Sprintf("localhost:%d", session.LocalPort)
+	keepHeader := session.LocalProxyProtocol
+	go func() {
+		for {
+			raw, err := listener.Accept()
+			if err != nil {
+				log.Debugf("TLS relay closed: %s", err)
+				return
+			}
+			go relayToLocalTLS(raw, localAddress, keepHeader)
+		}
+	}()
+	return nil
+}
+
+func relayToLocalTLS(raw net.Conn, localAddress string, keepProxyHeader bool) {
+	conn := raw
+	if !keepProxyHeader {
+		raw.SetDeadline(time.Now().Add(30 * time.Second))
+		stripped, clientIP, err := stripProxyProtocol(raw)
+		if err != nil {
+			log.Debugf("could not read PROXY header: %s", err)
+			raw.Close()
+			return
+		}
+		raw.SetDeadline(time.Time{})
+		if clientIP != "" {
+			log.Debugf("TLS relay: connection from %s", clientIP)
+		}
+		conn = stripped
+	}
+	target, err := net.Dial("tcp", localAddress)
+	if err != nil {
+		log.Warn(err)
+		conn.Close()
+		return
+	}
+	go func() {
+		defer conn.Close()
+		defer target.Close()
+		io.Copy(conn, target)
+	}()
+	go func() {
+		io.Copy(target, conn)
+	}()
+}
+
 func terminate(raw net.Conn, config *tls.Config, localAddress string) {
 	log.Debugf("TLS terminator: accepted a connection from the tunnel")
 	raw.SetDeadline(time.Now().Add(30 * time.Second))

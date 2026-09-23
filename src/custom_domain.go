@@ -94,18 +94,17 @@ func (app *App) applyCustomDomainMode() {
 	latched := h.latched
 	h.mu.Unlock()
 
-	effective := false
+	useDomain := false
 	switch {
 	case h.wantDomain == "":
-		// Passthrough without a custom domain (--tls-cert on the openport
-		// address); nothing to wait for.
-		effective = true
+		// Passthrough without a custom domain (--tls-cert or --local-tls on
+		// the openport address); nothing to wait for.
 	case latched:
-		effective = true
+		useDomain = true
 	default:
 		addr := app.Session.HttpForwardAddress
 		if addr != "" && domainRoutable(h.wantDomain, addr) {
-			effective = true
+			useDomain = true
 			h.mu.Lock()
 			h.latched = true
 			h.mu.Unlock()
@@ -113,25 +112,44 @@ func (app *App) applyCustomDomainMode() {
 		}
 	}
 
-	if effective {
-		app.Session.TlsPassthrough = true
-		app.Session.CustomDomain = h.wantDomain
-		if h.terminatorPort == 0 {
-			if err := app.StartTLSTerminator(&app.Session); err != nil {
-				log.Fatalf("%s", err)
-			}
-			h.terminatorPort = app.Session.TlsProxyPort
-		}
-		app.Session.TlsProxyPort = h.terminatorPort
+	waiting := h.wantDomain != "" && !useDomain
+	if waiting && !app.Session.LocalTLS {
+		// Terminator mode cannot get a certificate before the domain routes
+		// here, so serve a normal http-forward while we wait.
+		app.Session.TlsPassthrough = false
+		app.Session.CustomDomain = ""
+		app.Session.TlsProxyPort = 0
+		app.maybePrintDomainGuidance()
+		app.ensureDomainPoller()
 		return
 	}
+	// Local-TLS mode keeps passthrough up even while waiting: the local
+	// service owns the certificate, and the plain http-forward fallback
+	// would feed it plaintext. Until the CNAME routes, the forward works on
+	// the standard address (with the local certificate's name mismatch).
 
-	// Not routable yet: serve a normal http-forward and guide the user.
-	app.Session.TlsPassthrough = false
+	app.Session.TlsPassthrough = true
 	app.Session.CustomDomain = ""
-	app.Session.TlsProxyPort = 0
-	app.maybePrintDomainGuidance()
-	app.ensureDomainPoller()
+	if useDomain {
+		app.Session.CustomDomain = h.wantDomain
+	}
+	if h.terminatorPort == 0 {
+		var err error
+		if app.Session.LocalTLS {
+			err = app.StartTLSRelay(&app.Session)
+		} else {
+			err = app.StartTLSTerminator(&app.Session)
+		}
+		if err != nil {
+			log.Fatalf("%s", err)
+		}
+		h.terminatorPort = app.Session.TlsProxyPort
+	}
+	app.Session.TlsProxyPort = h.terminatorPort
+	if waiting {
+		app.maybePrintDomainGuidance()
+		app.ensureDomainPoller()
+	}
 }
 
 func (app *App) maybePrintDomainGuidance() {
