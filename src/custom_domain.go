@@ -83,11 +83,18 @@ func (app *App) maybePrintDomainGuidance() {
 	app.domainGuidancePrinted = true
 	app.mu.Unlock()
 	log.Infof("-----------------------------------------------------------------")
-	log.Infof("To serve https://%s with end-to-end encryption, create this DNS record:", app.wantDomain)
+	log.Infof("To serve https://%s with end-to-end encryption, create a CNAME", app.wantDomain)
+	log.Infof("record at your DNS provider. In most provider dashboards:")
+	log.Infof("    Type:          CNAME")
+	log.Infof("    Name/Host:     the subdomain part of %s", app.wantDomain)
+	log.Infof("                   (some providers want the full name; no trailing dot)")
+	log.Infof("    Value/Target:  %s", addr)
+	log.Infof("    TTL:           any (300 is fine)")
+	log.Infof("Or, as a raw zone file entry:")
 	log.Infof("    %s.   CNAME   %s.", app.wantDomain, addr)
-	log.Infof("No restart needed: this will switch over automatically within a")
-	log.Infof("minute of the record propagating. Until then %s stays reachable", app.wantDomain)
-	log.Infof("on https://%s .", addr)
+	log.Infof("No restart needed: this switches over automatically within a")
+	log.Infof("minute of the record propagating. Until then, your service stays")
+	log.Infof("reachable on https://%s .", addr)
 	log.Infof("-----------------------------------------------------------------")
 }
 
