@@ -493,6 +493,14 @@ func run(app *o.App, args []string) {
 			if (*tlsCertPath == "") != (*tlsKeyPath == "") {
 				log.Fatal("--tls-cert and --tls-key must be given together")
 			}
+			if *customDomain == "" && *tlsCertPath == "" {
+				// Let's Encrypt would issue for the <xxxxx>.u.openport.io
+				// address through the tunnel, but those certificates draw
+				// from the openport.io per-domain rate limit that the
+				// servers' own wildcard renewals depend on. Off the table
+				// until u.openport.io is on the Public Suffix List.
+				log.Fatal("--tls-passthrough needs --domain or --tls-cert/--tls-key")
+			}
 			*httpForward = true
 		}
 
