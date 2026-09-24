@@ -228,7 +228,7 @@ func acmeClientForDirectory(directory string) (*acme.Client, error) {
 			return nil, fmt.Errorf("no certificates found in %s", caFile)
 		}
 		client.HTTPClient = &http.Client{
-			Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}},
+			Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}},
 		}
 	}
 	return client, nil
