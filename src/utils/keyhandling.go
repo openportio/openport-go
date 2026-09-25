@@ -72,6 +72,12 @@ func CreateKeys() ([]byte, ssh.Signer, error) {
 		return nil, nil, err
 	}
 	defer privateKeyFile.Close()
+	// OpenFile's mode only applies when the file is being created. Rotating
+	// over a key written by an older client reuses its inode, and those were
+	// created 0644 -- so tighten the permissions explicitly every time.
+	if err := privateKeyFile.Chmod(0600); err != nil {
+		return nil, nil, err
+	}
 	privateKeyPEM := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)}
 	if err := pem.Encode(privateKeyFile, privateKeyPEM); err != nil {
 		return nil, nil, err
@@ -164,11 +170,11 @@ func RotateKeys() (oldPublicKey []byte, newPublicKey []byte, restore func(), err
 		if !hadPreviousKey {
 			return
 		}
-		if err := os.WriteFile(OPENPORT_PRIVATE_KEY_PATH, previousPrivate, 0600); err != nil {
+		if err := os.WriteFile(OPENPORT_PRIVATE_KEY_PATH, previousPrivate, 0600); err != nil { // #nosec G703 -- path is OPENPORT_HOME/id_rsa, chosen by the local user, not remote input
 			log.Errorf("Could not restore your previous private key: %s", err)
 			return
 		}
-		if err := os.WriteFile(OPENPORT_PUBLIC_KEY_PATH, previousPublic, 0644); err != nil {
+		if err := os.WriteFile(OPENPORT_PUBLIC_KEY_PATH, previousPublic, 0644); err != nil { // #nosec G703 G306 -- same local path; the public key is deliberately world-readable
 			log.Errorf("Could not restore your previous public key: %s", err)
 			return
 		}

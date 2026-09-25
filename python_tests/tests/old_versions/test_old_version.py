@@ -366,7 +366,10 @@ class OldVersionsTest(TestCase):
         container = self.docker_client.containers.run(
             f"openport-client:{ubuntu_version}_{version.version}",
             detach=True,
-            command=f"sleep 180",  # sleep for 3 minutes
+            # The sleep must outlast the whole upgrade flow (UPGRADE_TIMEOUT),
+            # or the container auto-removes itself mid-test on a slow run.
+            # It still acts as a fallback cleanup if stopping the container fails.
+            command=f"sleep {UPGRADE_TIMEOUT + 120}",
             remove=True,
         )
         self.containers.append(container)
@@ -511,6 +514,21 @@ class OldVersionsTest(TestCase):
             b"hello\n",
         )
 
+    def wait_for_ssh_echo(self, remote_host, remote_port, timeout=60):
+        """Retry check_ssh_echo until the tunnel is reachable. After
+        restart-sessions the client needs a few seconds to re-establish the
+        tunnel; until then the ssh connection is refused."""
+
+        def try_echo():
+            try:
+                self.check_ssh_echo(remote_host, remote_port)
+                return True
+            except AssertionError as e:
+                logging.info("ssh echo not up yet: %s", e)
+                return False
+
+        wait_for_response(try_echo, timeout=timeout)
+
     def start_and_check_upgrade(self, version, ubuntu_version, upgrade_version):
         version.test_started = datetime.now()
 
@@ -520,8 +538,10 @@ class OldVersionsTest(TestCase):
             self.start_ssh_server(container)
             # old version
             stream = self.start_openport(container, port)
+            # 10 versions connect to the test server concurrently; 15s was not
+            # always enough for the slower/older clients to get their tunnel up.
             remote_host, remote_port, link = (
-                get_remote_host_and_port__docker_exec_result(stream, timeout=15)
+                get_remote_host_and_port__docker_exec_result(stream, timeout=60)
             )
             self.assertIsNotNone(link)
             click_open_for_ip_link(link)
@@ -547,6 +567,8 @@ class OldVersionsTest(TestCase):
                     return False
 
             wait_for_response(do_click)
-            self.check_ssh_echo(remote_host, remote_port)
+            # Clicking the link only talks to the server; the restarted
+            # client may not have its tunnel up yet, so retry the ssh check.
+            self.wait_for_ssh_echo(remote_host, remote_port)
         finally:
             self.stop_container_in_thread(container)

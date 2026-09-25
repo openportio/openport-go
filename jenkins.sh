@@ -10,7 +10,10 @@ export UID
 export GID=$(id -g)
 
 rm -rf test-results/*
-PROJECT_NAME=$(openssl rand -hex 6)
+# CI passes a deterministic PROJECT_NAME so its after_script can run
+# "docker compose -p $PROJECT_NAME down" when the job is cancelled mid-run.
+# Local runs keep a random name so concurrent invocations don't collide.
+PROJECT_NAME="${PROJECT_NAME:-$(openssl rand -hex 6)}"
 
 #GO tests
 yq 'del(.services[].ports)' docker-compose.yaml > docker-compose-no-ports.yaml

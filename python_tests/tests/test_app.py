@@ -2308,6 +2308,22 @@ for i in range(%s):
             http_server.stop()
 
 
+def only_own_tests(cls):
+    """Mask the test methods a class inherits so only its own are collected.
+
+    Subclassing AppTests is how a class borrows its setUp and helpers, but it
+    also re-collects all ~60 inherited tests. AppTestWS wants that -- it exists
+    to re-run the suite under --ws. A class that only adds a few tests of its
+    own does not, and without this the whole suite runs twice per pipeline.
+    """
+    for base in cls.__mro__[1:]:
+        for name in vars(base):
+            if name.startswith("test") and name not in vars(cls):
+                setattr(cls, name, None)
+    return cls
+
+
+@only_own_tests
 class AppTestUDP(AppTests):
     """Tests that verify UDP forwarding works alongside the standard TCP tunnel.
     The client automatically sets up both TCP and UDP on the same port.

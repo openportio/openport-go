@@ -243,3 +243,26 @@ func TestEnsureKeysExistReusesExistingKey(t *testing.T) {
 		t.Error("the existing key was replaced; this would orphan the user's account")
 	}
 }
+
+func TestCreateKeysTightensPermissionsOfAnExistingKeyFile(t *testing.T) {
+	withTempOpenportHome(t)
+
+	// A key file created by an older client via os.Create: 0644 under the
+	// usual umask. OpenFile's mode argument does not apply to existing files,
+	// so writing the replacement key must chmod explicitly.
+	if err := os.WriteFile(OPENPORT_PRIVATE_KEY_PATH, []byte("old key material"), 0644); err != nil {
+		t.Fatalf("writing existing key file: %s", err)
+	}
+
+	if _, _, err := CreateKeys(); err != nil {
+		t.Fatalf("CreateKeys: %s", err)
+	}
+
+	info, err := os.Stat(OPENPORT_PRIVATE_KEY_PATH)
+	if err != nil {
+		t.Fatalf("stat: %s", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Errorf("the private key should be 0600 after rotation, got %04o", perm)
+	}
+}

@@ -3,8 +3,10 @@ package utils
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/rsa"
 	"os"
 	"path"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -221,5 +223,43 @@ func TestKnownHostsParsingIgnoresNoise(t *testing.T) {
 	}
 	if err := cb("ssh.openport.io:22", nil, other); err == nil {
 		t.Fatal("a key belonging to a different host was accepted")
+	}
+}
+
+func TestHostKeyAlgorithmsMatchThePublishedKeyType(t *testing.T) {
+	_, authorized := newTestKey(t)
+	got := HostKeyAlgorithms(authorized)
+	want := []string{ssh.KeyAlgoED25519}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("HostKeyAlgorithms(ed25519 key) = %v, want %v", got, want)
+	}
+}
+
+func TestHostKeyAlgorithmsForRSAOfferAllRSASignatureVariants(t *testing.T) {
+	// An ssh-rsa key can be verified via any RSA signature algorithm; all of
+	// them must be offered or a server preferring rsa-sha2 could not connect.
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generating key: %s", err)
+	}
+	sshPub, err := ssh.NewPublicKey(&rsaKey.PublicKey)
+	if err != nil {
+		t.Fatalf("converting key: %s", err)
+	}
+	got := HostKeyAlgorithms(string(ssh.MarshalAuthorizedKey(sshPub)))
+	want := []string{ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256, ssh.KeyAlgoRSA}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("HostKeyAlgorithms(rsa key) = %v, want %v", got, want)
+	}
+}
+
+func TestHostKeyAlgorithmsFallBackToLibraryDefaults(t *testing.T) {
+	// No published key (TOFU) and a malformed key both return nil: the first
+	// has nothing to pin to, the second is rejected by HostKeyCallback anyway.
+	if got := HostKeyAlgorithms(""); got != nil {
+		t.Errorf("HostKeyAlgorithms(\"\") = %v, want nil", got)
+	}
+	if got := HostKeyAlgorithms("not a key"); got != nil {
+		t.Errorf("HostKeyAlgorithms(malformed) = %v, want nil", got)
 	}
 }

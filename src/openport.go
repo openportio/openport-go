@@ -85,6 +85,11 @@ type PortResponse struct {
 type RegisterKeyResponse struct {
 	Status string `json:"status"`
 	Error  string `json:"error"`
+	// Set by servers that understand replaces_public_key ("processed" or
+	// "no-active-key"). Empty means the server ignored the field: Django
+	// drops unknown form fields silently, so without this acknowledgement a
+	// "status: ok" proves nothing about the old key being retired.
+	KeyRotation string `json:"key_rotation"`
 }
 
 type ServerResponseError struct {
@@ -288,41 +293,70 @@ func (app *App) registerKey(keyBindingToken string, name string, proxy string, s
 
 	httpClient := GetHttpClient(proxy)
 	postUrl := fmt.Sprintf("%s/linkKey", server)
-	getParameters := url.Values{
-		"public_key":        {string(publicKey)},
-		"key_binding_token": {keyBindingToken},
-		"key_name":          {name},
-		"client_version":    {VERSION},
-		"platform":          {runtime.GOOS},
+	sendRegistration := func(publicKey []byte, replacesPublicKey []byte) RegisterKeyResponse {
+		getParameters := url.Values{
+			"public_key":        {string(publicKey)},
+			"key_binding_token": {keyBindingToken},
+			"key_name":          {name},
+			"client_version":    {VERSION},
+			"platform":          {runtime.GOOS},
+		}
+		if replacesPublicKey != nil {
+			// Tells the server to retire the key this one replaces, and to move
+			// its reserved ports across. Only honoured within the account the
+			// token belongs to.
+			getParameters["replaces_public_key"] = []string{string(replacesPublicKey)}
+		}
+		log.Debugf("parameters: %s", getParameters)
+		resp, err := httpClient.PostForm(postUrl, getParameters)
+		if err != nil {
+			fail("HTTP error: %s", err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			fail("Body error: %s", err)
+		}
+		log.Debugf("%s", string(body))
+		response := RegisterKeyResponse{}
+		if jsonErr := json.Unmarshal(body, &response); jsonErr != nil {
+			fail("Json Decode error: %s", jsonErr)
+		}
+		return response
 	}
-	if replacesPublicKey != nil {
-		// Tells the server to retire the key this one replaces, and to move
-		// its reserved ports across. Only honoured within the account the
-		// token belongs to.
-		getParameters["replaces_public_key"] = []string{string(replacesPublicKey)}
-	}
-	log.Debugf("parameters: %s", getParameters)
-	resp, err := httpClient.PostForm(postUrl, getParameters)
-	if err != nil {
-		fail("HTTP error: %s", err)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fail("Body error: %s", err)
-	}
-	log.Debugf("%s", string(body))
-	response := RegisterKeyResponse{}
-	jsonErr := json.Unmarshal(body, &response)
-	if jsonErr != nil {
-		fail("Json Decode error: %s", err)
-	}
+
+	response := sendRegistration(publicKey, replacesPublicKey)
 	if response.Status != "ok" {
 		fail("Could not register key: %s", response.Error)
 		app.Stop(EXIT_CODE_KEY_REGISTERED_FAILED)
-	} else {
-		log.Info("key successfully registered")
-		app.Stop(EXIT_CODE_KEY_REGISTERED_OK)
 	}
+
+	// A rotation only happened if the server says it processed
+	// replaces_public_key. Servers that predate the field return "ok" while
+	// ignoring it entirely, which would leave the old key active server-side
+	// as a live credential and the reserved ports behind on it.
+	if replacesPublicKey != nil && response.KeyRotation == "" {
+		restoreKey()
+		if forceRotate {
+			log.Fatalf("The server does not support key rotation yet; your " +
+				"previous key has been restored and nothing was changed. " +
+				"The key sent during this attempt is unused but registered: " +
+				"you can remove it at https://openport.io/user/keys .")
+		}
+		// Plain "register" with a weak key: fall back to registering the
+		// existing key so the command still does what it was asked to do,
+		// and leave rotation for when the server supports it.
+		log.Warnf("The server does not support key rotation; keeping your "+
+			"existing %d-bit key and registering it unchanged. The new key "+
+			"sent during this attempt is unused; you can remove it at "+
+			"https://openport.io/user/keys .", bits)
+		response = sendRegistration(replacesPublicKey, nil)
+		if response.Status != "ok" {
+			log.Fatalf("Could not register key: %s", response.Error)
+		}
+	}
+
+	log.Info("key successfully registered")
+	app.Stop(EXIT_CODE_KEY_REGISTERED_OK)
 }
 
 func SessionIsLive(session db.Session) bool {
@@ -435,9 +469,9 @@ func (app *App) getRestartCommandBasedOnSessionContent(session db.Session, serve
 
 func (app *App) getRestartCommand(session db.Session, server string) []string {
 	restartCommand := strings.Split(session.RestartCommand, " ")
-	if (len(restartCommand) > 1 && restartCommand[1][0] != '-' && restartCommand[0] != "--port") ||
+	if (len(restartCommand) > 1 && len(restartCommand[1]) > 0 && restartCommand[1][0] != '-' && restartCommand[0] != "--port") ||
 		strings.Contains(restartCommand[0], "\n") ||
-		restartCommand[0][0] == 0x80 {
+		(len(restartCommand[0]) > 0 && restartCommand[0][0] == 0x80) {
 		log.Debugf("Migrating from older version: %s", session.RestartCommand)
 		// Python pickle
 		buf := bytes.NewBufferString(session.RestartCommand)
@@ -448,21 +482,30 @@ func (app *App) getRestartCommand(session db.Session, server string) []string {
 			restartCommand = app.getRestartCommandBasedOnSessionContent(session, server)
 		} else {
 			log.Debugf("this is unpickled : <%s>", unpickled)
+			// The pickle comes from the local DB (written by the old Python
+			// client), never from the server -- but a corrupt entry must not
+			// panic the client, so no unchecked type assertions here.
 			restartCommand = []string{}
-			unpickledInterfaces, castWasOk := unpickled.([]interface{})
-			if castWasOk {
-				for _, part := range unpickledInterfaces {
-					restartCommand = append(restartCommand, part.(string))
+			switch unpickledValue := unpickled.(type) {
+			case []interface{}:
+				for _, part := range unpickledValue {
+					if partString, ok := part.(string); ok {
+						restartCommand = append(restartCommand, partString)
+					} else {
+						log.Warnf("Ignoring non-string element in pickled restart command: %v", part)
+					}
 				}
-			} else {
-				unpickledString := unpickled.(string)
-				if unpickledString == "" {
-					restartCommand = app.getRestartCommandBasedOnSessionContent(session, server)
-				} else {
-					restartCommand = []string{unpickledString}
+			case string:
+				if unpickledValue != "" {
+					restartCommand = []string{unpickledValue}
 				}
+			default:
+				log.Warnf("Unexpected pickled restart command type %T", unpickled)
 			}
-			if strings.Contains(restartCommand[0], "openport") {
+			if len(restartCommand) == 0 {
+				restartCommand = app.getRestartCommandBasedOnSessionContent(session, server)
+			}
+			if len(restartCommand) > 0 && strings.Contains(restartCommand[0], "openport") {
 				restartCommand = restartCommand[1:]
 			}
 		}
@@ -554,7 +597,18 @@ func (app *App) StartControlServer(controlPort int) int {
 	router.HandleFunc("/exit", app.StopSession)
 	router.HandleFunc("/info", app.InfoRequest)
 	log.Debugf("Listening for control on port %d", controlPort)
-	go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", controlPort), router)
+	server := &http.Server{
+		Addr:              fmt.Sprintf("127.0.0.1:%d", controlPort),
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+	}
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Errorf("Control server stopped: %s", err)
+		}
+	}()
 	return controlPort
 }
 
@@ -881,9 +935,9 @@ func (app *App) startUDPChannelHandler(sshClient *ssh.Client, session db.Session
 	payload := ssh.Marshal(struct {
 		Host string
 		Port uint32
-	}{Host: "0.0.0.0", Port: uint32(session.RemotePort)})
+	}{Host: "0.0.0.0", Port: uint32(session.RemotePort)}) // #nosec G115 -- a TCP port, 0-65535
 
-	ok, _, err := sshClient.Conn.SendRequest("udpip-forward", true, payload)
+	ok, replyData, err := sshClient.Conn.SendRequest("udpip-forward", true, payload)
 	if err != nil {
 		log.Warnf("UDP forwarding not available: %s", err)
 		return
@@ -892,7 +946,25 @@ func (app *App) startUDPChannelHandler(sshClient *ssh.Client, session db.Session
 		log.Warn("UDP forwarding request rejected by server")
 		return
 	}
-	log.Infof("UDP forwarding enabled on remote port %d", session.RemotePort)
+
+	// ok alone proves nothing: deployed servers ack *every* unknown global
+	// request (the request loop's default branch replies true), so a server
+	// that actually implements udpip-forward must prove it by echoing the
+	// address it is listening on. No payload means an older server that
+	// silently dropped the request -- don't advertise UDP as active.
+	reply := struct {
+		Host string
+		Port uint32
+	}{}
+	if len(replyData) == 0 || ssh.Unmarshal(replyData, &reply) != nil {
+		log.Infof("The server does not support UDP forwarding; only TCP is forwarded on remote port %d.", session.RemotePort)
+		return
+	}
+	if reply.Host != "" {
+		log.Infof("UDP forwarding enabled on %s:%d", reply.Host, session.RemotePort)
+	} else {
+		log.Infof("UDP forwarding enabled on remote port %d", session.RemotePort)
+	}
 
 	go func() {
 		for newChannel := range sshClient.HandleChannelOpen("forwarded-udp") {
@@ -971,7 +1043,10 @@ func Connect(key ssh.Signer, session db.Session) (*ssh.Client, chan bool, error)
 			ssh.PublicKeys(key),
 		},
 		HostKeyCallback: hostKeyCallback,
-		Timeout:         time.Duration(session.KeepAliveSeconds) * time.Second,
+		// Only offer algorithms for the key type the API published, so a
+		// server with several host keys presents the one we can verify.
+		HostKeyAlgorithms: utils.HostKeyAlgorithms(session.HostKey),
+		Timeout:           time.Duration(session.KeepAliveSeconds) * time.Second,
 	}
 
 	var sshClient *ssh.Client

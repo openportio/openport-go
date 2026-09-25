@@ -1,3 +1,4 @@
+import weakref
 from signal import SIGINT
 
 import docker.models.containers
@@ -5,6 +6,10 @@ import docker.models.containers
 from tests.utils.logger_service import get_logger
 
 logger = get_logger(__name__)
+
+# How much of each process's accumulated (stdout, stderr) earlier
+# get_remote_host_and_port calls have already matched against; see there.
+_forward_line_cursors = weakref.WeakKeyDictionary()
 
 
 class TimeoutException(Exception):
@@ -383,10 +388,33 @@ def get_remote_host_and_port(
     http_forward=False,
     forward_tunnel=False,
 ):
-    get_log_method = lambda: "".join(i for i in osinteraction.get_output(p) if i)
-    return get_remote_host_and_port__generic(
-        get_log_method, timeout, output_prefix, http_forward, forward_tunnel
-    )
+    # Read via the accumulator, not the live queues: once
+    # print_output_continuously_threaded is running, every queue item goes to
+    # exactly one consumer, so polling get_output here races the printer for
+    # the "Now forwarding" line and loses often enough to fail tests. The
+    # accumulator sees every line no matter which thread drained it. A
+    # per-process cursor, advanced only when a call returns a match, keeps a
+    # reconnect from re-matching the previous session's line without ever
+    # skipping output produced between calls.
+    start_out, start_err = _forward_line_cursors.get(p, (0, 0))
+    logged = ""
+    start = datetime.datetime.now()
+    text = ""
+    while start + datetime.timedelta(seconds=timeout) > datetime.datetime.now():
+        out, err = osinteraction.get_accumulated_output(p)
+        text = out[start_out:] + err[start_err:]
+        if text.strip() and text != logged:
+            new_part = text[len(logged):] if text.startswith(logged) else text
+            logger.info("%s - <<<<<%s>>>>>" % (output_prefix, new_part))
+            logged = text
+        result = get_remote_host_and_port_from_output(
+            text, http_forward, forward_tunnel
+        )
+        if result:
+            _forward_line_cursors[p] = (len(out), len(err))
+            return result
+        sleep(0.1)
+    raise Exception("remote host and port not found in output: {}".format(text))
 
 
 def get_remote_host_and_port__docker(
@@ -397,25 +425,12 @@ def get_remote_host_and_port__docker(
     forward_tunnel=False,
 ) -> tuple[str, int, str]:
     """returns host, port, link"""
-    log_stream = container.logs(stream=True)
-    new_logs = ""
-
-    def read_logs():
-        nonlocal new_logs
-        for line in log_stream:
-            new_logs += line.decode("utf-8")
-
-    t = threading.Thread(target=read_logs)
-    t.start()
-
-    def get_log_method():
-        nonlocal new_logs
-        result = new_logs
-        new_logs = ""
-        return result
-
     return get_remote_host_and_port__generic(
-        get_log_method, timeout, output_prefix, http_forward, forward_tunnel
+        _accumulate_stream(container.logs(stream=True)),
+        timeout,
+        output_prefix,
+        http_forward,
+        forward_tunnel,
     )
 
 
@@ -427,26 +442,27 @@ def get_remote_host_and_port__docker_exec_result(
     forward_tunnel=False,
 ) -> tuple[str, int, str]:
     """returns host, port, link"""
-    log_stream = exec_result.output
-    new_logs = ""
+    return get_remote_host_and_port__generic(
+        _accumulate_stream(exec_result.output),
+        timeout,
+        output_prefix,
+        http_forward,
+        forward_tunnel,
+    )
+
+
+def _accumulate_stream(log_stream):
+    """Drain a docker log stream in a background thread; the returned callable
+    gives everything received so far. Appending to a list and joining it are
+    each atomic under the GIL, so the reader never races the consumer."""
+    chunks = []
 
     def read_logs():
-        nonlocal new_logs
         for line in log_stream:
-            new_logs += line.decode("utf-8")
+            chunks.append(line.decode("utf-8"))
 
-    t = threading.Thread(target=read_logs)
-    t.start()
-
-    def get_log_method():
-        nonlocal new_logs
-        result = new_logs
-        new_logs = ""
-        return result
-
-    return get_remote_host_and_port__generic(
-        get_log_method, timeout, output_prefix, http_forward, forward_tunnel
-    )
+    threading.Thread(target=read_logs, daemon=True).start()
+    return lambda: "".join(chunks)
 
 
 def get_remote_host_and_port__generic(
@@ -456,32 +472,41 @@ def get_remote_host_and_port__generic(
     http_forward=False,
     forward_tunnel=False,
 ) -> tuple[str, int, str]:
-    """returns host, port, link"""
+    """returns host, port, link
 
+    get_log_method must return the full output accumulated so far. Matching
+    the full text (instead of draining chunks) means a match can never be
+    lost to a reader race or split across two reads.
+    """
     logger.debug("waiting for response")
-    start = datetime.datetime.now()
-    all_output = ["", ""]
-    while start + datetime.timedelta(seconds=timeout) > datetime.datetime.now():
-        output = get_log_method()
-        if "Now forwarding " in output and "http" not in output:
-            sleep(0.1)
-            output += get_log_method()
-
-        all_output += output
-        if output:
-            logger.info("%s - <<<<<%s>>>>>" % (output_prefix, output))
-        else:
-            sleep(0.1)
-            continue
+    deadline = datetime.datetime.now() + datetime.timedelta(seconds=timeout)
+    link_deadline = None  # set once host/port matched but the link hasn't yet
+    logged_len = 0
+    text = ""
+    while True:
+        text = get_log_method()
+        if len(text) > logged_len:
+            logger.info("%s - <<<<<%s>>>>>" % (output_prefix, text[logged_len:]))
+            logged_len = len(text)
         result = get_remote_host_and_port_from_output(
-            output, http_forward, forward_tunnel
+            text, http_forward, forward_tunnel
         )
+        now = datetime.datetime.now()
         if result:
-            return result
-
-    raise Exception(
-        "remote host and port not found in output: {}".format("".join(all_output))
-    )
+            host, port, link = result
+            if link is not None:
+                return result
+            # The client logs the link on the line after "Now forwarding";
+            # give it a moment to arrive before reporting a link-less session.
+            if link_deadline is None:
+                link_deadline = now + datetime.timedelta(seconds=2)
+            elif now > link_deadline:
+                return result
+        elif now > deadline:
+            raise Exception(
+                "remote host and port not found in output: {}".format(text)
+            )
+        sleep(0.1)
 
 
 def wait_for_response(

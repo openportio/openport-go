@@ -105,6 +105,39 @@ func HostKeyCallback(expectedAuthorizedKey string) (ssh.HostKeyCallback, error) 
 	}, nil
 }
 
+// HostKeyAlgorithms returns the host key algorithms to offer during key
+// exchange, matched to the key the API published.
+//
+// Without this the ssh package offers its full default list and the server
+// picks its preferred type. Today the server has a single RSA host key, but
+// the moment it gains a second key type (the planned Ed25519 migration,
+// CRA-COMPLIANCE-PLAN item 10) it would start presenting that one -- and
+// HostKeyCallback would then compare it against the published RSA key and
+// refuse every connection. Pinning the offered algorithms to the published
+// key's type makes the server present the key we can actually verify.
+//
+// Returns nil (library defaults) when no key was published: the TOFU path has
+// no expectation to pin to. A malformed key also returns nil; HostKeyCallback
+// already fails closed on it with a proper error.
+func HostKeyAlgorithms(expectedAuthorizedKey string) []string {
+	expectedAuthorizedKey = strings.TrimSpace(expectedAuthorizedKey)
+	if expectedAuthorizedKey == "" {
+		return nil
+	}
+	expectedKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(expectedAuthorizedKey))
+	if err != nil {
+		return nil
+	}
+	switch expectedKey.Type() {
+	case ssh.KeyAlgoRSA:
+		// An ssh-rsa *key* can be verified via any of the RSA signature
+		// algorithms; offer the SHA-2 ones first.
+		return []string{ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256, ssh.KeyAlgoRSA}
+	default:
+		return []string{expectedKey.Type()}
+	}
+}
+
 // trustOnFirstUseCallback verifies against known_hosts only. Unknown hosts are
 // accepted and recorded; a host whose key has changed is rejected.
 func trustOnFirstUseCallback(hostname string, remote net.Addr, presented ssh.PublicKey) error {

@@ -189,7 +189,7 @@ func (client *WSClient) ForwardPort(localPort int) {
 
 func (client *WSClient) InitForward(token string, remotePort int) error {
 	tunnelRequest := TunnelRequest{
-		Port:  uint32(remotePort),
+		Port:  uint32(remotePort), // #nosec G115 -- a TCP port, 0-65535
 		Token: token,
 	}
 

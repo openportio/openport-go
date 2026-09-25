@@ -18,7 +18,7 @@ func WriteFrame(w io.Writer, data []byte) error {
 		return fmt.Errorf("datagram too large: %d > %d", len(data), MaxUDPPayload)
 	}
 	header := make([]byte, 2)
-	binary.BigEndian.PutUint16(header, uint16(len(data)))
+	binary.BigEndian.PutUint16(header, uint16(len(data))) // #nosec G115 -- len checked against MaxUDPPayload above
 	if _, err := w.Write(header); err != nil {
 		return err
 	}

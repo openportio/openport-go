@@ -269,3 +269,24 @@ func TestConnectionTimeoutWithSuccessfulConnection(t *testing.T) {
 	}
 	reserveApp.Stop(0)
 }
+
+func TestStripAutomaticRestart(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"long flag", []string{"8080", "--restart-on-reboot", "--automatic-restart"}, []string{"8080", "--restart-on-reboot"}},
+		{"long flag with value", []string{"8080", "--automatic-restart=true"}, []string{"8080"}},
+		{"short flag", []string{"8080", "-a"}, []string{"8080"}},
+		{"short flag with value", []string{"8080", "-a=true"}, []string{"8080"}},
+		{"combined shorthand", []string{"8080", "-va"}, []string{"8080", "-v"}},
+		{"combined shorthand with value for it", []string{"8080", "-va=true"}, []string{"8080", "-v"}},
+		{"combined shorthand with value for another flag", []string{"8080", "-ad=x"}, []string{"8080", "-d=x"}},
+		{"kept after terminator", []string{"8080", "--", "-a"}, []string{"8080", "--", "-a"}},
+		{"unrelated flags untouched", []string{"8080", "-v", "--server", "https://x"}, []string{"8080", "-v", "--server", "https://x"}},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, stripAutomaticRestart(c.in), c.name)
+	}
+}

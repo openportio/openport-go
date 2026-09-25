@@ -41,3 +41,6 @@ security-reports/
 # generated keypair for python_tests/tests/old_versions upgrade test
 test_id_rsa
 test_id_rsa.pub
+
+# client-generated key/config dirs from local runs -- these hold private keys
+.openport/
