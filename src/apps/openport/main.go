@@ -108,6 +108,14 @@ func run(app *o.App, args []string) {
 	tlsKeyPath := defaultFlagSet.String("tls-key", "", "Path to the PEM private key for --tls-cert.")
 	acmeDirectory := defaultFlagSet.String("acme-directory", "",
 		"(testing) Alternative ACME directory URL for the tls-passthrough certificates.")
+	localTLS := defaultFlagSet.Bool("local-tls", false,
+		"With --tls-passthrough: the local service serves HTTPS itself, so relay the encrypted "+
+			"bytes to it instead of terminating TLS here. You manage the certificate (renew via "+
+			"DNS-01; http-01 does not reach a passthrough forward).")
+	localProxyProtocol := defaultFlagSet.Bool("local-proxy-protocol", false,
+		"With --local-tls: pass the PROXY protocol header (the visitor's real IP) through to "+
+			"the local service instead of stripping it. The local service must expect it, e.g. "+
+			"nginx 'listen 443 ssl proxy_protocol'.")
 
 	addRequestServerFlag := func(set *flag.FlagSet) {
 		set.StringVar(&sshServer, "request-server", "", "The requested tunnel server")
@@ -499,13 +507,13 @@ func run(app *o.App, args []string) {
 			if (*tlsCertPath == "") != (*tlsKeyPath == "") {
 				log.Fatal("--tls-cert and --tls-key must be given together")
 			}
-			if *customDomain == "" && *tlsCertPath == "" {
+			if *customDomain == "" && *tlsCertPath == "" && !*localTLS {
 				// Let's Encrypt would issue for the <xxxxx>.u.openport.io
 				// address through the tunnel, but those certificates draw
 				// from the openport.io per-domain rate limit that the
 				// servers' own wildcard renewals depend on. Off the table
 				// until u.openport.io is on the Public Suffix List.
-				log.Fatal("--tls-passthrough needs --domain or --tls-cert/--tls-key")
+				log.Fatal("--tls-passthrough needs one of --domain, --tls-cert or --local-tls")
 			}
 			// The paths are persisted and replayed by restart-sessions from a
 			// different working directory, so relative spellings must be
@@ -515,6 +523,15 @@ func run(app *o.App, args []string) {
 				*tlsKeyPath = mustAbs("--tls-key", *tlsKeyPath)
 			}
 			*httpForward = true
+		}
+		if *localTLS && !*tlsPassthrough {
+			log.Fatal("--local-tls requires --tls-passthrough")
+		}
+		if *localTLS && (*tlsCertPath != "" || *tlsKeyPath != "") {
+			log.Fatal("--local-tls means the local service owns the certificate; drop --tls-cert/--tls-key")
+		}
+		if *localProxyProtocol && !*localTLS {
+			log.Fatal("--local-proxy-protocol requires --local-tls")
 		}
 
 		if daemonize {
@@ -531,6 +548,8 @@ func run(app *o.App, args []string) {
 			TlsCertPath:         *tlsCertPath,
 			TlsKeyPath:          *tlsKeyPath,
 			AcmeDirectory:       *acmeDirectory,
+			LocalTLS:            *localTLS,
+			LocalProxyProtocol:  *localProxyProtocol,
 			Server:              server,
 			KeepAliveSeconds:    keepAliveSeconds,
 			Proxy:               socksProxy,
