@@ -1,6 +1,6 @@
 FROM openport-go-amd64 AS builder
 
-FROM python:3.12.7-bullseye
+FROM python:3.13.6-bullseye
 WORKDIR /apps/openport
 COPY requirements.txt /apps/openport/
 RUN pip install -r requirements.txt
