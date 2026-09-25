@@ -1,0 +1,175 @@
+# Replaces the Jenkinsfile. Runs on a shell-executor GitLab Runner that has
+# docker + docker-compose-plugin + yq (Python) + openssl available (see
+# gitlab_installation/runner/cloud-init.yaml).
+#
+# Required CI variable (Project → Settings → CI/CD → Variables, masked):
+#   KEY_REGISTRATION_TOKEN — passed into the test docker-compose so the
+#   client can register with test.openport.io. Without it, the Go tests
+#   fail at the register step.
+
+stages:
+  - test
+  - scan
+
+test:
+  stage: test
+  tags:
+    - shell
+  timeout: 1h
+  # Let "Auto-cancel redundant pipelines" cancel this job when a newer commit
+  # lands on the same branch (the runner is concurrent=1, so a stale pipeline
+  # blocks the fresh one).
+  interruptible: true
+  variables:
+    # Deterministic compose project name (jenkins.sh honours it) so that
+    # after_script can tear the stack down again. Without this a cancelled
+    # job -- routine now that the pipeline is interruptible -- leaks a
+    # running compose stack with live tunnels that no later cleanup touches:
+    # docker system prune only removes *stopped* containers.
+    PROJECT_NAME: "op-ci-$CI_PIPELINE_ID"
+  before_script:
+    - rm -rf test-results
+    - mkdir -p test-results
+  script:
+    - ./jenkins.sh
+  after_script:
+    # GitLab runs after_script on cancel as well: take down whichever compose
+    # stack (Go or Python tests, same project name) was still running.
+    - docker compose -p "$PROJECT_NAME" down --remove-orphans || true
+    # Containers write reports and .pyc caches as root into the bind-mounted
+    # source tree. Chown back so the next job's git clean -fdx succeeds.
+    - docker run --rm -v "$PWD":/work alpine sh -c "chown -R $(id -u):$(id -g) /work" || true
+    # Reclaim disk on the small runner droplet (mirrors Jenkinsfile post.always).
+    - docker system prune -f || true
+    - docker volume prune -f || true
+  artifacts:
+    when: always
+    paths:
+      - test-results/
+    reports:
+      junit: test-results/*.xml
+    expire_in: 1 week
+
+# ---------------------------------------------------------------------------
+# Security scanning (EU Cyber Resilience Act, Annex I Part II)
+#
+# ENFORCING: the initial backlog is triaged (false positives carry #nosec
+# annotations with justifications), so these jobs now block the pipeline.
+# govulncheck fails on reachable vulnerabilities, gosec on unannotated
+# high-severity findings, trivy on HIGH/CRITICAL vulns or leaked secrets.
+#
+# This is the client -- the binary end users actually download and run -- so
+# findings here carry more weight than server-side ones.
+# ---------------------------------------------------------------------------
+
+.scan_base:
+  stage: scan
+  tags:
+    - shell
+  timeout: 30m
+  interruptible: true
+  before_script:
+    - mkdir -p security-reports
+  after_script:
+    - docker run --rm -v "$PWD":/work alpine sh -c "chown -R $(id -u):$(id -g) /work" || true
+    - docker system prune -f || true
+  artifacts:
+    when: always
+    paths:
+      - security-reports/
+    expire_in: 1 month
+
+# Dependency vulnerabilities, call-graph aware.
+#
+# Watch for findings in jinzhu/gorm v1.9.16 -- that package is archived
+# upstream and receives no security backports, so anything reported against it
+# will not be fixed by a version bump. See CRA-COMPLIANCE-PLAN.md item 20.
+govulncheck:
+  extends: .scan_base
+  script:
+    # All continuation lines must stay at the same indent: a more-indented
+    # line suppresses YAML folding and leaves "| tee" on a line of its own,
+    # which is a bash syntax error.
+    #
+    # tee runs *inside* the container and the job exits on PIPESTATUS[0]: a
+    # host-side "| tee" without pipefail made tee's exit code the job status,
+    # so a failing govulncheck still passed (and job 1702 uploaded an empty
+    # artifact).
+    #
+    # govulncheck is pinned: @latest broke the job when x/vuln v1.8.0 started
+    # requiring a newer Go than the image ships (job 4953). The vuln database
+    # is fetched live either way, so pinning the tool loses nothing.
+    - >
+      docker run --rm -v "$PWD":/repo -w /repo/src golang:1.26.8-bookworm
+      bash -c "go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 &&
+      \$(go env GOPATH)/bin/govulncheck ./...
+      | tee /repo/security-reports/govulncheck.txt;
+      exit \${PIPESTATUS[0]}"
+
+# Static analysis of first-party code only. src/vendor is excluded: those are
+# upstream sources, covered by govulncheck, and scanning them buries our own
+# findings. src/go is a GOPATH the test compose stack drops into the tree;
+# gosec errors out trying to import the module cache in it.
+gosec:
+  extends: .scan_base
+  script:
+    # Full reports (all severities) as artifacts, never failing.
+    - >
+      docker run --rm -v "$PWD":/repo -w /repo/src securego/gosec:latest
+      -exclude-dir=vendor -exclude-dir=go
+      -fmt=json -out=/repo/security-reports/gosec.json -no-fail ./...
+    - >
+      docker run --rm -v "$PWD":/repo -w /repo/src securego/gosec:latest
+      -exclude-dir=vendor -exclude-dir=go -no-fail
+      -fmt=text -out=/repo/security-reports/gosec.txt ./...
+    # The gate: high-severity findings fail the job. No tee -- a pipe would
+    # make tee's exit code the job status and mask gosec's.
+    - >
+      docker run --rm -v "$PWD":/repo -w /repo/src securego/gosec:latest
+      -exclude-dir=vendor -exclude-dir=go -severity=high ./...
+
+# Filesystem scan for vulnerable dependencies and leaked secrets.
+trivy_fs:
+  extends: .scan_base
+  script:
+    # Report run first (exit code 0 regardless of findings), then the gate
+    # run with --exit-code 1. The second run hits the cached DB and scan
+    # results, so it is cheap. No tee on the gate -- a pipe would make tee's
+    # exit code the job status and mask trivy's.
+    - >
+      docker run --rm -v "$PWD":/repo
+      -v trivy-cache:/root/.cache/trivy
+      aquasec/trivy:latest fs /repo
+      --scanners vuln,secret
+      --severity HIGH,CRITICAL
+      --skip-dirs /repo/src/go/pkg
+      --skip-dirs "/repo/old exes"
+      --no-progress
+      --output /repo/security-reports/trivy-fs.txt
+    - >
+      docker run --rm -v "$PWD":/repo
+      -v trivy-cache:/root/.cache/trivy
+      aquasec/trivy:latest fs /repo
+      --scanners vuln,secret
+      --severity HIGH,CRITICAL
+      --skip-dirs /repo/src/go/pkg
+      --skip-dirs "/repo/old exes"
+      --no-progress
+      --exit-code 1
+
+# Software Bill of Materials (CRA Annex I Part II(1)).
+#
+# Source-tree SBOM only -- CI does not build the release binaries. The
+# authoritative per-binary SBOMs come from ./generate-sbom.sh after
+# ./docker_compile_all.sh, and those are what ship alongside a release.
+sbom:
+  extends: .scan_base
+  script:
+    - bash -ex ./generate-sbom.sh --source
+    - mv sbom/* security-reports/ || true
+  artifacts:
+    when: always
+    paths:
+      - security-reports/
+    expire_in: 6 months
+

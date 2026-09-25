@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+#
+# Generates SBOMs for the Openport client.
+#
+# EU Cyber Resilience Act, Annex I Part II(1): manufacturers must identify and
+# document the components in their products, "including by drawing up a
+# software bill of materials in a commonly used machine-readable format
+# covering at the very least the top-level dependencies".
+#
+# Two formats are emitted per target:
+#   *.cdx.json   CycloneDX  -- primary; this is the format to publish
+#   *.spdx.json  SPDX       -- secondary; some consumers and procurement
+#                              processes ask for it specifically
+#
+# Usage:
+#   ./generate-sbom.sh            # SBOM per built binary, plus the source tree
+#   ./generate-sbom.sh --source   # source tree only (no binaries needed)
+#
+# Run ./docker_compile_all.sh first if you want the per-binary SBOMs -- those
+# are the authoritative ones, because syft reads the module metadata that Go
+# embeds into the compiled binary. That reflects what actually shipped, which
+# a scan of the source tree cannot prove.
+
+set -euo pipefail
+cd "$(dirname "$0")"
+
+SYFT_IMAGE="${SYFT_IMAGE:-anchore/syft:latest}"
+OUT_DIR="sbom"
+SOURCE_ONLY=0
+
+[ "${1:-}" = "--source" ] && SOURCE_ONLY=1
+
+mkdir -p "$OUT_DIR"
+
+# Version is a hardcoded constant rather than a build-time ldflag, so parse it
+# out of the source. See CRA-COMPLIANCE-PLAN.md item 16 -- once the version is
+# injected via -ldflags -X, read it from the binary instead.
+VERSION="$(sed -n 's/.*VERSION[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' src/openport.go | head -1)"
+if [ -z "$VERSION" ]; then
+  echo "ERROR: could not determine version from src/openport.go" >&2
+  exit 1
+fi
+echo "Openport client version: $VERSION"
+
+syft() {
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    -v "$PWD":/repo \
+    -w /repo \
+    "$SYFT_IMAGE" "$@"
+}
+
+generate() {
+  local target="$1" name="$2"
+  shift 2
+  echo "--- SBOM: $name ($target)"
+  syft scan "$target" \
+    --source-name "openport-client" \
+    --source-version "$VERSION" \
+    -o "cyclonedx-json=$OUT_DIR/$name.cdx.json" \
+    -o "spdx-json=$OUT_DIR/$name.spdx.json" \
+    -q "$@"
+}
+
+# Source tree.
+#
+# go/pkg is excluded deliberately: a full Go toolchain and module cache is
+# committed under src/go/pkg. Left in, it contributes ~380 components -- every
+# compiler binary and cached module -- which are build tooling, not things we
+# ship. An SBOM that lists the Go linker as a product component is worse than
+# no SBOM: it buries the real dependencies and misrepresents the product.
+# That directory should not be in version control at all.
+#
+# vendor/ is excluded because those same packages are already reported from
+# go.mod; including both double-counts every dependency.
+#
+# The compiled ./openport is excluded too: if a build has been run, syft
+# catalogues both go.mod and the binary and every dependency appears twice.
+# The binary gets its own SBOM below.
+generate "dir:/repo/src" "openport-client-$VERSION-source" \
+  --exclude './go/pkg/**' \
+  --exclude './vendor/**' \
+  --exclude './openport'
+
+if [ "$SOURCE_ONLY" -eq 0 ]; then
+  BINARIES=(
+    openport-amd64
+    openport-arm64
+    openport-armhf
+    openport-armv6
+    openport-armv7
+    openport-windows-amd64.exe
+    openportw-windows-amd64.exe
+    openport-service-windows-amd64.exe
+    src/openport
+  )
+
+  found=0
+  for bin in "${BINARIES[@]}"; do
+    if [ -f "$bin" ]; then
+      generate "file:/repo/$bin" "openport-client-$VERSION-$(basename "$bin" | tr '.' '-')"
+      found=$((found + 1))
+    else
+      echo "--- skip: $bin not built"
+    fi
+  done
+
+  if [ "$found" -eq 0 ]; then
+    echo
+    echo "WARNING: no binaries found -- only a source-tree SBOM was produced."
+    echo "Run ./docker_compile_all.sh first for per-artifact SBOMs."
+  fi
+fi
+
+echo
+echo "SBOMs written to $OUT_DIR/:"
+ls -1 "$OUT_DIR"

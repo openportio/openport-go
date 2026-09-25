@@ -2,16 +2,16 @@ package main
 
 import (
 	"fmt"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+
 	o "github.com/openportio/openport-go"
 	db "github.com/openportio/openport-go/database"
 	"github.com/openportio/openport-go/utils"
 	log "github.com/sirupsen/logrus"
 	flag "github.com/spf13/pflag"
-	"net"
-	"os"
-	"slices"
-	"strconv"
-	"strings"
 )
 
 func main() {
@@ -104,7 +104,7 @@ func run(app *o.App, args []string) {
 
 	addWSFlags := func(set *flag.FlagSet) {
 		set.BoolVar(&useWS, "ws", false, "Use the websockets protocol instead of ssh.")
-		set.BoolVar(&noSSL, "no-ssl", false, "Connect to the Openport servers without using SSL (only used if the --ws flag is set)")
+		set.BoolVar(&noSSL, "no-ssl", false, "INSECURE: Connect to the Openport servers unencrypted, exposing all tunnelled traffic to the network (only used if the --ws flag is set)")
 
 	}
 	addWSFlags(defaultFlagSet)
@@ -136,6 +136,7 @@ func run(app *o.App, args []string) {
 
 	versionFlagSet := flag.NewFlagSet("version", flag.ExitOnError)
 	addHelpFlag(versionFlagSet)
+	addVerboseFlag(versionFlagSet)
 	flagSets["version"] = versionFlagSet
 
 	killFlagSet := flag.NewFlagSet("kill", flag.ExitOnError)
@@ -212,6 +213,28 @@ func run(app *o.App, args []string) {
 			}
 		}
 		app.RegisterKey(*registerKeyToken, *registerKeyName, socksProxy, server)
+	case "rotate-key":
+		_ = registerKeyFlagSet.Parse(args[2:])
+		app.DbHandler.SetPath(dbPath)
+		if help {
+			println("Replaces this machine's key with a newly generated one and registers it,")
+			println("retiring the old key. Your reserved ports are carried over.")
+			println("Usage: openport rotate-key <token> [arguments]")
+			println("Get the token at https://openport.io/user/keys .")
+			registerKeyFlagSet.PrintDefaults()
+			app.Stop(o.EXIT_CODE_HELP)
+			return
+		}
+		o.InitLogging(verbose, o.LogPath)
+		rotateTail := registerKeyFlagSet.Args()
+		if *registerKeyToken == "" {
+			if len(rotateTail) == 0 {
+				log.Fatalf("--token is required. Get it at https://openport.io/user/keys .")
+			} else {
+				registerKeyToken = &rotateTail[0]
+			}
+		}
+		app.RotateKey(*registerKeyToken, *registerKeyName, socksProxy, server)
 	case "version":
 		_ = versionFlagSet.Parse(args[2:])
 		app.DbHandler.SetPath(dbPath)
@@ -222,7 +245,12 @@ func run(app *o.App, args []string) {
 			app.Stop(o.EXIT_CODE_HELP)
 			return
 		}
+		// Build scripts parse this output as the bare version — keep it single-line
+		// unless verbose is asked for.
 		fmt.Println(o.VERSION)
+		if verbose {
+			fmt.Println("git: " + o.GitSha)
+		}
 	case "kill":
 		_ = killFlagSet.Parse(args[2:])
 		app.DbHandler.SetPath(dbPath)
@@ -407,6 +435,7 @@ func run(app *o.App, args []string) {
 				println("  restart-sessions      Restart all sessions that are started with the --restart-on-reboot flag.")
 				println("  rm <local_port>       Remove a port from your local database.")
 				println("  register <token>      Link your device to your account.")
+				println("  rotate-key <token>    Replace this machine's key with a new one.")
 				println("  version               Show the version of the client executable.")
 				println("Run 'openport <command> --help' for more information about the command.")
 				println("")
@@ -469,10 +498,7 @@ func run(app *o.App, args []string) {
 		app.Session.AppManagementPort = controlPort
 
 		if restartOnReboot {
-			restartCommand := args[1:]
-			slices.DeleteFunc(restartCommand, func(s string) bool {
-				return s == "--automatic-restart" || s == "-a"
-			})
+			restartCommand := stripAutomaticRestart(args[1:])
 			app.Session.RestartCommand = strings.Join(restartCommand, " ")
 		}
 		app.InitFiles()
@@ -481,8 +507,51 @@ func run(app *o.App, args []string) {
 	app.Stop(0)
 }
 
+// stripAutomaticRestart removes every spelling of the hidden
+// --automatic-restart flag from a saved command line. The flag marks the
+// current run as an automatic restart; persisting it would make every
+// restart-sessions replay behave like one.
+//
+// pflag accepts more spellings than the bare tokens: "--automatic-restart=true",
+// the shorthand combined with other flags ("-va"), and the shorthand with a
+// value ("-a=true"). All of them have to go; the other flags in a combined
+// group have to stay.
+func stripAutomaticRestart(args []string) []string {
+	result := make([]string, 0, len(args))
+	for i, arg := range args {
+		if arg == "--" {
+			// Everything after the terminator is positional; keep it as-is.
+			result = append(result, args[i:]...)
+			break
+		}
+		if arg == "--automatic-restart" || strings.HasPrefix(arg, "--automatic-restart=") {
+			continue
+		}
+		if len(arg) > 1 && arg[0] == '-' && arg[1] != '-' {
+			letters, value, hasValue := strings.Cut(arg[1:], "=")
+			if strings.ContainsRune(letters, 'a') {
+				// A "=value" binds to the last shorthand in the group; drop it
+				// only when that was the flag being stripped.
+				if hasValue && strings.HasSuffix(letters, "a") {
+					hasValue = false
+				}
+				letters = strings.ReplaceAll(letters, "a", "")
+				if letters == "" {
+					continue
+				}
+				arg = "-" + letters
+				if hasValue {
+					arg += "=" + value
+				}
+			}
+		}
+		result = append(result, arg)
+	}
+	return result
+}
+
 func myUsage() {
-	fmt.Printf("Usage: %s (<port> | forward | list | restart-sessions | kill <port> | kill-all | register <token> | rm <port> | version) [arguments]\n", os.Args[0])
+	fmt.Printf("Usage: %s (<port> | forward | list | restart-sessions | kill <port> | kill-all | register <token> | rotate-key <token> | rm <port> | version) [arguments]\n", os.Args[0])
 	fmt.Println("Type 'openport <command> --help' for more information about the different commands.")
 	fmt.Println("Default: openport <port> [arguments]")
 }

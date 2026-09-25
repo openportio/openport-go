@@ -37,7 +37,11 @@ func startHTTPServer(port int) *http.Server {
 	router := mux.NewRouter().StrictSlash(true)
 	router.HandleFunc("/", hello)
 	log.Infof("Starting HTTP server on port %d", port)
-	httpServer := &http.Server{Addr: fmt.Sprintf("0.0.0.0:%d", port), Handler: router}
+	httpServer := &http.Server{
+		Addr:              fmt.Sprintf("0.0.0.0:%d", port),
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
 	go httpServer.ListenAndServe()
 	return httpServer

@@ -4,7 +4,7 @@ pipeline {
     stage('Run Tests') {
       steps {
         bitbucketStatusNotify(buildState: 'INPROGRESS')
-        sh './jenkins.sh || true'
+        sh './jenkins.sh'
       }
     }
   }

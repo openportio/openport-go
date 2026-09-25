@@ -9,7 +9,7 @@ import (
 func PortIsAvailable(port int) bool {
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
-		log.Warnf("Can't listen on port %q: %s", port, err)
+		log.Warnf("Can't listen on port %d: %s", port, err)
 		return false
 	}
 	_ = ln.Close()
