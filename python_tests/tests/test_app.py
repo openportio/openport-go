@@ -45,7 +45,6 @@ from tests.utils.utils import (
     wait_for_response,
     check_udp_port_forward,
     udp_port_forward_available,
-    get_udp_host_from_output,
 )
 
 logger = get_logger(__name__)
@@ -2362,84 +2361,50 @@ class AppTestUDP(AppTests):
     """
 
     def _setup_tunnel(self):
-        """Helper: start openport process, return (port, remote_host, remote_port, udp_host, process).
-        udp_host is the server's real IP for UDP traffic (may differ from remote_host)."""
+        """Helper: start openport process, return (port, remote_host, remote_port, process)."""
         port = self.osinteraction.get_open_port()
         p = self.start_openport_process("--local-port", str(port))
-
-        # Collect all output while waiting for the remote host/port
-        all_output = []
-        original_get_output = self.osinteraction.get_output
-
-        def capturing_get_output(proc):
-            output = original_get_output(proc)
-            all_output.extend(i for i in output if i)
-            return output
-
-        self.osinteraction.get_output = capturing_get_output
-        try:
-            remote_host, remote_port, link = get_remote_host_and_port(
-                p, self.osinteraction, timeout=30
-            )
-        finally:
-            self.osinteraction.get_output = original_get_output
-
+        remote_host, remote_port, link = get_remote_host_and_port(
+            p, self.osinteraction, timeout=30
+        )
         self.check_application_is_still_alive(p)
         click_open_for_ip_link(link)
+        return port, remote_host, remote_port, p
 
-        # Extract UDP host from the captured output
-        combined = "".join(all_output)
-        udp_host = get_udp_host_from_output(combined)
-
-        # If not found yet, wait a bit more
-        if not udp_host:
-            for _ in range(20):
-                output = "".join(i for i in self.osinteraction.get_output(p) if i)
-                udp_host = get_udp_host_from_output(output)
-                if udp_host:
-                    break
-                sleep(0.1)
-
-        if not udp_host:
-            udp_host = remote_host  # fallback
-        logger.info(f"UDP host: {udp_host}, remote_host: {remote_host}")
-
-        return port, remote_host, remote_port, udp_host, p
-
-    def _check_udp_or_skip(self, udp_host, remote_port, local_port):
+    def _check_udp_or_skip(self, remote_host, remote_port, local_port):
         """Try a UDP echo round-trip. Skip the test if the server doesn't support UDP."""
-        if not udp_port_forward_available(udp_host, remote_port, local_port):
+        if not udp_port_forward_available(remote_host, remote_port, local_port):
             self.skipTest(
                 "Server does not support UDP forwarding yet — skipping"
             )
 
     def test_udp_port_forward(self):
         """Basic test: expose a local port, verify UDP datagrams are forwarded."""
-        port, remote_host, remote_port, udp_host, p = self._setup_tunnel()
+        port, remote_host, remote_port, p = self._setup_tunnel()
 
         # TCP should still work
         check_tcp_port_forward(
             self, remote_host=remote_host, local_port=port, remote_port=remote_port
         )
 
-        # UDP: probe first, then do a full check using the UDP host
-        self._check_udp_or_skip(udp_host, remote_port, port)
+        # UDP should also work on the same remote host/port
+        self._check_udp_or_skip(remote_host, remote_port, port)
         check_udp_port_forward(
-            self, remote_host=udp_host, local_port=port, remote_port=remote_port
+            self, remote_host=remote_host, local_port=port, remote_port=remote_port
         )
 
     def test_udp_and_tcp_simultaneously(self):
         """Verify TCP and UDP both work on the same tunnel, interleaved."""
-        port, remote_host, remote_port, udp_host, p = self._setup_tunnel()
+        port, remote_host, remote_port, p = self._setup_tunnel()
 
-        self._check_udp_or_skip(udp_host, remote_port, port)
+        self._check_udp_or_skip(remote_host, remote_port, port)
 
         # Interleave TCP and UDP checks
         check_tcp_port_forward(
             self, remote_host=remote_host, local_port=port, remote_port=remote_port
         )
         check_udp_port_forward(
-            self, remote_host=udp_host, local_port=port, remote_port=remote_port
+            self, remote_host=remote_host, local_port=port, remote_port=remote_port
         )
         check_tcp_port_forward(
             self, remote_host=remote_host, local_port=port, remote_port=remote_port
@@ -2449,9 +2414,9 @@ class AppTestUDP(AppTests):
         """Send multiple UDP datagrams through the tunnel."""
         import socket as _socket
 
-        port, remote_host, remote_port, udp_host, p = self._setup_tunnel()
+        port, remote_host, remote_port, p = self._setup_tunnel()
 
-        self._check_udp_or_skip(udp_host, remote_port, port)
+        self._check_udp_or_skip(remote_host, remote_port, port)
 
         from tests.utils.utils import SimpleUdpEchoServer
 
@@ -2465,13 +2430,21 @@ class AppTestUDP(AppTests):
             try:
                 for i in range(5):
                     msg = f"datagram_{i}".encode()
-                    sock.sendto(msg, (udp_host, remote_port))
+                    sock.sendto(msg, (remote_host, remote_port))
                     data, _ = sock.recvfrom(65535)
                     self.assertEqual(b"echo:" + msg, data)
             finally:
                 sock.close()
         finally:
             server.close()
+
+
+class AppTestUDPWS(AppTestUDP):
+    ws_options = ["--ws"]
+
+
+class AppTestUDPWSNoSSL(AppTestUDP):
+    ws_options = ["--ws", "--no-ssl"]
 
 
 class AppTestWS(AppTests):

@@ -50,6 +50,7 @@ func (client *WSClient) ForwardPort(localPort int) {
 
 	// read connections from server
 	channels := make(map[string]*Channel)
+	udpChannels := make(map[string]*net.UDPConn) // UDP flows: key -> local UDP conn
 	writeMu := &sync.Mutex{}
 	for {
 		channel, msg, chop, err := ChannelFromServerMessage(client.wsConn, writeMu)
@@ -61,8 +62,9 @@ func (client *WSClient) ForwardPort(localPort int) {
 		}
 
 		log.Trace("Channel Key: ", channel.GetKey())
-		if chop == ChOpNew {
-			log.Trace("Got new channel from server!")
+		switch chop {
+		case ChOpNew:
+			log.Trace("Got new TCP channel from server!")
 			conn, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(localPort))
 			if err != nil {
 				if err != io.EOF {
@@ -70,19 +72,16 @@ func (client *WSClient) ForwardPort(localPort int) {
 				}
 				_ = channel.Close()
 				continue
-
 			}
 			log.Trace("Dialed")
 			channel.NetConn = &conn
 			channels[channel.GetKey()] = channel
 
 			go func() {
-				// Write responses to websocket conn
 				for {
-					byts := make([]byte, 4096) // todo buffer
+					byts := make([]byte, 4096)
 					length, err := (*channel.NetConn).Read(byts)
 					log.Tracef("Got message from conn: %d", length)
-
 					if err != nil {
 						if err != io.EOF {
 							log.Error("Error reading from local server:", err)
@@ -105,37 +104,84 @@ func (client *WSClient) ForwardPort(localPort int) {
 					}
 				}
 			}()
-		} else {
+
+		case ChOpCont:
 			oldChannel, ok := channels[channel.GetKey()]
 			if !ok {
-				log.Errorf("Trying to get unknown channel: %s", channel.GetKey())
+				log.Errorf("Trying to get unknown TCP channel: %s", channel.GetKey())
 			} else {
-				channel = oldChannel
-				if chop == ChOpCont {
-					log.Trace("Got DATA from server!")
-					channel, ok := channels[channel.GetKey()]
-					if !ok {
-						log.Errorf("Trying to get unknown channel: %s", channel.GetKey())
+				_, err := (*oldChannel.NetConn).Write(msg)
+				if err != nil {
+					if err != io.EOF {
+						log.Error("could not write to local server: ", err)
 					} else {
-						_, err := (*channel.NetConn).Write(msg)
-						if err != nil {
-							if err != io.EOF {
-								log.Error("could not write to local server: ", err)
-							} else {
-								log.Trace("Got close from remote server")
-								_ = channel.Close()
-								_ = (*channel.NetConn).Close()
-							}
-						}
-
+						log.Trace("Got close from remote server")
+						_ = oldChannel.Close()
+						_ = (*oldChannel.NetConn).Close()
 					}
-				} else if chop == ChOpClose {
-					log.Trace("Got close from server!")
-					_ = (*channel.NetConn).Close()
-				} else {
-					log.Errorf("unknown Channel Operation: %#v", chop)
 				}
 			}
+
+		case ChOpClose:
+			oldChannel, ok := channels[channel.GetKey()]
+			if ok {
+				_ = (*oldChannel.NetConn).Close()
+				delete(channels, channel.GetKey())
+			}
+
+		case ChOpUdpNew:
+			log.Trace("Got new UDP channel from server!")
+			localAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:"+strconv.Itoa(localPort))
+			if err != nil {
+				log.Error("Could not resolve local UDP addr: ", err)
+				_ = channel.CloseUdp()
+				continue
+			}
+			localConn, err := net.DialUDP("udp", nil, localAddr)
+			if err != nil {
+				log.Error("Could not dial local UDP: ", err)
+				_ = channel.CloseUdp()
+				continue
+			}
+			udpChannels[channel.GetKey()] = localConn
+
+			// Read responses from local UDP service and send back
+			go func(ch *Channel, conn *net.UDPConn) {
+				buf := make([]byte, 65535)
+				for {
+					n, err := conn.Read(buf)
+					if err != nil {
+						log.Debugf("UDP read from local ended: %s", err)
+						return
+					}
+					err = ch.SendUdp(buf[:n])
+					if err != nil {
+						log.Debugf("UDP send to websocket failed: %s", err)
+						return
+					}
+				}
+			}(channel, localConn)
+
+		case ChOpUdpCont:
+			localConn, ok := udpChannels[channel.GetKey()]
+			if !ok {
+				log.Errorf("Trying to get unknown UDP channel: %s", channel.GetKey())
+			} else {
+				_, err := localConn.Write(msg)
+				if err != nil {
+					log.Error("Could not write to local UDP: ", err)
+				}
+			}
+
+		case ChOpUdpClose:
+			localConn, ok := udpChannels[channel.GetKey()]
+			if ok {
+				_ = localConn.Close()
+				delete(udpChannels, channel.GetKey())
+			}
+
+		default:
+			log.Errorf("unknown Channel Operation: %#v", chop)
 		}
 	}
 
