@@ -44,3 +44,10 @@ test_id_rsa.pub
 
 # client-generated key/config dirs from local runs -- these hold private keys
 .openport/
+
+# Release packaging output (packaging/build-debs.sh, packaging/publish-apt.sh)
+dist/
+packaging/build/
+# The apt repo public key IS committed -- the openport-* pattern above would
+# otherwise swallow it.
+!packaging/openport-archive-keyring.asc

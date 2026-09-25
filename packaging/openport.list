@@ -1,0 +1,5 @@
+# Openport apt repository -- installed by the openport package so that
+# "apt upgrade" (and unattended-upgrades) delivers future client updates.
+# Remove this file if you prefer to manage updates manually; dpkg will not
+# recreate it on upgrade once you delete it (it is a conffile).
+deb [signed-by=/usr/share/keyrings/openport-archive-keyring.gpg] https://openport.io/apt stable main

@@ -25,4 +25,6 @@ ENV GOCACHE=/go-cache
 COPY src/ /apps/go/
 
 ARG GIT_SHA=unknown
-RUN --mount=type=cache,target=/go-cache go build -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}" -tags netgo -o /openport-amd64 apps/openport/main.go
+# Release version (e.g. 2.2.4); empty keeps the VERSION var compiled into the source.
+ARG VERSION=
+RUN --mount=type=cache,target=/go-cache go build -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION}" -tags netgo -o /openport-amd64 apps/openport/main.go
