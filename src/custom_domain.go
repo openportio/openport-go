@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,6 +59,16 @@ type tlsPassthroughHandler struct {
 	interruptCurrent func()        // ends the current tunnel so the loop reconnects
 	done             chan struct{} // closed when the app stops
 	guidancePrinted  bool
+}
+
+// noteForwardAddress hands the poller the forwarding address from a port
+// response. applyCustomDomainMode runs before the request, so on a fresh
+// session its own snapshot is empty for the whole first connection; without
+// this the guidance and the upgrade check would wait for a reconnect.
+func (h *tlsPassthroughHandler) noteForwardAddress(address string) {
+	h.mu.Lock()
+	h.forwardAddress = address
+	h.mu.Unlock()
 }
 
 func (h *tlsPassthroughHandler) setInterrupt(fn func()) {
@@ -266,6 +278,30 @@ var probeResolvers = []*net.Resolver{
 	net.DefaultResolver,
 }
 
+// Test hook, like OPENPORT_ACME_CA_FILE: a comma-separated list of host:port
+// resolver addresses that replaces the probe list, so the e2e suite can point
+// the readiness poll at DNS it controls. The public resolvers would answer an
+// authoritative NXDOMAIN for a test domain, which ends the lookup (IsNotFound
+// below), so a hosts-file entry alone cannot fake the CNAME.
+const DNS_PROBE_ENV = "OPENPORT_DNS_PROBE"
+
+func probeResolverList() []*net.Resolver {
+	override := os.Getenv(DNS_PROBE_ENV)
+	if override == "" {
+		return probeResolvers
+	}
+	var resolvers []*net.Resolver
+	for _, address := range strings.Split(override, ",") {
+		if address = strings.TrimSpace(address); address != "" {
+			resolvers = append(resolvers, publicResolver(address))
+		}
+	}
+	if len(resolvers) == 0 {
+		return probeResolvers
+	}
+	return resolvers
+}
+
 func publicResolver(address string) *net.Resolver {
 	return &net.Resolver{
 		PreferGo: true,
@@ -277,7 +313,7 @@ func publicResolver(address string) *net.Resolver {
 }
 
 func lookupIPSet(host string) map[string]bool {
-	for _, resolver := range probeResolvers {
+	for _, resolver := range probeResolverList() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		ips, err := resolver.LookupHost(ctx, host)
 		cancel()
