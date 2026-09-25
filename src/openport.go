@@ -80,6 +80,11 @@ type PortResponse struct {
 	// Empty when talking to a server that predates host key publication; the
 	// client then falls back to trust-on-first-use. See utils/hostkey.go.
 	HostKey string `json:"host_key"`
+	// TlsPassthrough is the server's explicit acknowledgement that it will
+	// route the forward's TLS bytes through without terminating them. Old
+	// servers drop unknown form fields and leave this false; terminating
+	// TLS locally against such a server would serve TLS into TLS.
+	TlsPassthrough bool `json:"tls_passthrough"`
 }
 
 type RegisterKeyResponse struct {
@@ -105,6 +110,10 @@ type App struct {
 	ExitOnFailureTimeout int
 	Connected            chan bool
 	ConnectedState       ConnectionState
+
+	// Zero value for the common non-passthrough sessions; only carries
+	// state when --tls-passthrough is used. See custom_domain.go.
+	passthrough tlsPassthroughHandler
 }
 
 func CreateApp() *App {
@@ -697,9 +706,16 @@ func (app *App) CreateTunnel() {
 	}
 	defer app.DbHandler.SetInactive(&app.Session)
 
+	// Remember what the user asked for; the effective mode per connection is
+	// decided in applyCustomDomainMode (it may start as plain http-forward
+	// while we wait for the domain's CNAME to point at us, then upgrade).
+	app.passthrough.wantPassthrough = app.Session.TlsPassthrough
+	app.passthrough.wantDomain = app.Session.CustomDomain
+
 	go app.ConnectedState.DoState()
 
 	for {
+		app.applyCustomDomainMode()
 		response, err2 := app.RequestPortForward(&app.Session, publicKey)
 		if err2 != nil {
 			log.Error(err2)
@@ -736,7 +752,9 @@ func (app *App) CreateTunnel() {
 						app.Session.PrintMessage(response.Message)
 						app.MarkConnected()
 					}
+					app.passthrough.setInterrupt(func() { wsClient.Close() })
 					err = wsClient.StartReverseTunnel(app.Session, callback)
+					app.passthrough.clearInterrupt()
 				}
 			} else {
 				err = app.StartReverseTunnel(key, app.Session, response.Message)
@@ -805,6 +823,12 @@ func (app *App) RequestPortForward(session *db.Session, publicKey []byte) (PortR
 		"request_server":        {session.SshServer},
 		"automatic_restart":     {strconv.FormatBool(session.AutomaticRestart)},
 	}
+	if session.TlsPassthrough {
+		getParameters["tls_passthrough"] = []string{"true"}
+		if session.CustomDomain != "" {
+			getParameters["custom_domain"] = []string{session.CustomDomain}
+		}
+	}
 	switch strings.ToLower(session.UseIpLinkProtection) {
 	case "true", "false":
 		getParameters["ip_link_protection"] = []string{session.UseIpLinkProtection}
@@ -840,6 +864,15 @@ func (app *App) RequestPortForward(session *db.Session, publicKey []byte) (PortR
 			app.Stop(EXIT_CODE_FATAL_SESSION_ERROR)
 		}
 		return PortResponse{}, ServerResponseError{response.Error}
+	}
+
+	if session.TlsPassthrough && !response.TlsPassthrough {
+		// Without the explicit ack the server is still terminating TLS
+		// itself, and serving TLS into that tunnel would break the forward.
+		log.Error("This server does not support --tls-passthrough. Upgrade the server or drop the flag.")
+		app.DbHandler.SetInactive(session)
+		app.Stop(EXIT_CODE_FATAL_SESSION_ERROR)
+		return PortResponse{}, ServerResponseError{"server does not support tls_passthrough"}
 	}
 
 	log.Debugf("ServerPort: %d", response.ServerPort)
@@ -897,6 +930,11 @@ func (app *App) StartReverseTunnel(key ssh.Signer, session db.Session, message s
 	stopFuncRef := app.StopHooks.PushBack(stopFunc)
 	defer app.StopHooks.Remove(stopFuncRef)
 
+	// Let the custom-domain poller end just this connection (so the loop
+	// reconnects and upgrades to passthrough) without stopping the app.
+	app.passthrough.setInterrupt(func() { sshClient.Close(); listener.Close() })
+	defer app.passthrough.clearInterrupt()
+
 	// Also set up UDP forwarding on the same port, over the same SSH connection
 	app.startUDPChannelHandler(sshClient, session)
 
@@ -912,7 +950,7 @@ func (app *App) StartReverseTunnel(key ssh.Signer, session db.Session, message s
 
 		go func(c net.Conn) {
 			log.Debugf("new request")
-			conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", session.LocalPort))
+			conn, err := net.Dial("tcp", session.TunnelDialAddress())
 			if err != nil {
 				log.Warn(err)
 			} else {

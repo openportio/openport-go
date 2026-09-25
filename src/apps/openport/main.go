@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -95,6 +96,18 @@ func run(app *o.App, args []string) {
 	addIpLinkProtectionFlag(defaultFlagSet)
 
 	httpForward := defaultFlagSet.Bool("http-forward", false, "Request an http forward, so you can connect to port 80 on the server.")
+
+	tlsPassthrough := defaultFlagSet.Bool("tls-passthrough", false,
+		"Terminate TLS on this machine instead of on the openport servers, so the tunnelled "+
+			"traffic stays encrypted end-to-end. Certificates come from Let's Encrypt unless "+
+			"--tls-cert and --tls-key are given. Implies --http-forward.")
+	customDomain := defaultFlagSet.String("domain", "",
+		"Your own domain for the tls-passthrough forward. Create a CNAME record pointing it to "+
+			"your forwarding address first.")
+	tlsCertPath := defaultFlagSet.String("tls-cert", "", "Path to the PEM certificate (chain) served for the tls-passthrough forward.")
+	tlsKeyPath := defaultFlagSet.String("tls-key", "", "Path to the PEM private key for --tls-cert.")
+	acmeDirectory := defaultFlagSet.String("acme-directory", "",
+		"(testing) Alternative ACME directory URL for the tls-passthrough certificates.")
 
 	addRequestServerFlag := func(set *flag.FlagSet) {
 		set.StringVar(&sshServer, "request-server", "", "The requested tunnel server")
@@ -474,6 +487,36 @@ func run(app *o.App, args []string) {
 			}
 		}
 
+		if *customDomain != "" && !*tlsPassthrough {
+			log.Fatal("--domain requires --tls-passthrough")
+		}
+		if *tlsPassthrough && forwardTunnel {
+			// A forward tunnel has no public side to terminate TLS for; the
+			// terminator would start but nothing could ever dial it.
+			log.Fatal("--tls-passthrough only applies to sessions that expose a local port, not to 'openport forward'")
+		}
+		if *tlsPassthrough {
+			if (*tlsCertPath == "") != (*tlsKeyPath == "") {
+				log.Fatal("--tls-cert and --tls-key must be given together")
+			}
+			if *customDomain == "" && *tlsCertPath == "" {
+				// Let's Encrypt would issue for the <xxxxx>.u.openport.io
+				// address through the tunnel, but those certificates draw
+				// from the openport.io per-domain rate limit that the
+				// servers' own wildcard renewals depend on. Off the table
+				// until u.openport.io is on the Public Suffix List.
+				log.Fatal("--tls-passthrough needs --domain or --tls-cert/--tls-key")
+			}
+			// The paths are persisted and replayed by restart-sessions from a
+			// different working directory, so relative spellings must be
+			// pinned down now.
+			if *tlsCertPath != "" {
+				*tlsCertPath = mustAbs("--tls-cert", *tlsCertPath)
+				*tlsKeyPath = mustAbs("--tls-key", *tlsKeyPath)
+			}
+			*httpForward = true
+		}
+
 		if daemonize {
 			app.StartDaemon(args)
 			return
@@ -483,6 +526,11 @@ func run(app *o.App, args []string) {
 			LocalPort:           port,
 			UseIpLinkProtection: useIpLinkProtection,
 			HttpForward:         *httpForward,
+			TlsPassthrough:      *tlsPassthrough,
+			CustomDomain:        *customDomain,
+			TlsCertPath:         *tlsCertPath,
+			TlsKeyPath:          *tlsKeyPath,
+			AcmeDirectory:       *acmeDirectory,
 			Server:              server,
 			KeepAliveSeconds:    keepAliveSeconds,
 			Proxy:               socksProxy,
@@ -499,6 +547,12 @@ func run(app *o.App, args []string) {
 
 		if restartOnReboot {
 			restartCommand := stripAutomaticRestart(args[1:])
+			if *tlsCertPath != "" {
+				// Replayed from a different working directory on boot, so the
+				// stored command must carry the absolutized paths.
+				restartCommand = rewriteFlagValue(restartCommand, "--tls-cert", *tlsCertPath)
+				restartCommand = rewriteFlagValue(restartCommand, "--tls-key", *tlsKeyPath)
+			}
 			app.Session.RestartCommand = strings.Join(restartCommand, " ")
 		}
 		app.InitFiles()
@@ -546,6 +600,41 @@ func stripAutomaticRestart(args []string) []string {
 			}
 		}
 		result = append(result, arg)
+	}
+	return result
+}
+
+// mustAbs resolves a user-supplied flag path against the current working
+// directory, so a relative spelling still points at the same file when the
+// session is replayed from somewhere else.
+func mustAbs(flagName, p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		log.Fatalf("could not resolve %s path %q: %s", flagName, p, err)
+	}
+	return abs
+}
+
+// rewriteFlagValue replaces the value of a long flag in a saved command
+// line, handling both the "--flag value" and "--flag=value" spellings.
+// Everything after a "--" terminator is positional and stays untouched.
+func rewriteFlagValue(args []string, flagName, value string) []string {
+	result := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			result = append(result, args[i:]...)
+			break
+		}
+		switch {
+		case arg == flagName && i+1 < len(args):
+			result = append(result, arg, value)
+			i++
+		case strings.HasPrefix(arg, flagName+"="):
+			result = append(result, flagName+"="+value)
+		default:
+			result = append(result, arg)
+		}
 	}
 	return result
 }
