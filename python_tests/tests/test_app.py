@@ -1390,9 +1390,10 @@ class AppTests(unittest.TestCase):
             s.stop()
 
     def check_legacy_tls_handshake(self, remote_host):
-        # Deployed customer devices (Windows Server 2008 R2 era) can only do TLSv1 with
-        # ECDHE-RSA-AES256-CBC-SHA (OpenSSL name: ECDHE-RSA-AES256-SHA),
-        # so the https forward must keep accepting that handshake.
+        # Some legacy embedded clients (Windows Server 2008 R2 era) can only
+        # do TLSv1 with ECDHE-RSA-AES256-CBC-SHA (OpenSSL name:
+        # ECDHE-RSA-AES256-SHA), so the https forward must keep accepting
+        # that handshake.
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.minimum_version = ssl.TLSVersion.TLSv1
         ctx.maximum_version = ssl.TLSVersion.TLSv1
