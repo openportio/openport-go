@@ -724,6 +724,7 @@ func (app *App) CreateTunnel() {
 			continue
 		}
 		httpSleeper.Reset()
+		app.passthrough.noteForwardAddress(app.Session.HttpForwardAddress)
 
 		var err error
 		if app.Session.ForwardTunnel {
