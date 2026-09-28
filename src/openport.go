@@ -1268,7 +1268,7 @@ func (state *DisconnectedState) DoState() {
 				app: state.app,
 			}
 		} else {
-			log.Errorf("Should not get an update about disconnected when already in the disconnected state. This is most likely a bug.")
+			log.Debugf("Still disconnected after a failed reconnect.")
 			state.app.ConnectedState = &DisconnectedState{
 				app: state.app,
 			}
@@ -1282,9 +1282,15 @@ func (state *DisconnectedState) IsConnected() bool {
 }
 
 func (app *App) MarkDisconnected() {
-	if app.ConnectedState.IsConnected() {
-		app.Connected <- false
+	// The connected event of a reconnect that died right away may still be
+	// queued: drop it, or the state machine consumes it after this
+	// disconnect, flips back to connected with nothing left to correct it,
+	// and --exit-on-failure-timeout never fires.
+	select {
+	case <-app.Connected:
+	default:
 	}
+	app.Connected <- false
 }
 
 func (app *App) MarkConnected() {
