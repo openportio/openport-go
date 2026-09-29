@@ -1,33 +1,27 @@
-FROM ubuntu:16.04
-MAINTAINER JanDeBleser
+FROM debian:bookworm-slim
+LABEL os=linux
+LABEL arch=armv7
 
-RUN apt-get update && apt-get install -y software-properties-common wget gcc curl
+# The binary is linked fully statically (see the build flags below), so the
+# build distro's glibc version does not matter for compatibility with old
+# target systems.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        gcc-arm-linux-gnueabi \
+        libc6-dev-armel-cross \
+        wget \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
 RUN wget https://go.dev/dl/go1.26.8.linux-amd64.tar.gz && \
     rm -rf /usr/local/go &&  \
     tar -C /usr/local -xzf go1.26.8.linux-amd64.tar.gz
 ENV PATH=$PATH:/usr/local/go/bin
 
-LABEL os=linux
-LABEL arch=armv7
-
 ENV GOOS=linux
 ENV GOARCH=arm
+ENV GOARM=7
 ENV CGO_ENABLED=1
 ENV CC=arm-linux-gnueabi-gcc
-ENV PATH="/go/bin/${GOOS}_${GOARCH}:${PATH}"
-ENV PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabi/pkgconfig
-
-# install build & runtime dependencies
-RUN dpkg --add-architecture arm \
-    && apt-get update \
-    && dpkg --configure -a \
-    && apt-get install -y --no-install-recommends \
-        protobuf-compiler \
-        upx \
-        gcc-arm-linux-gnueabi \
-        libc6-dev-armel-cross \
-        pkg-config curl \
-    && rm -rf /var/lib/apt/lists/*
 
 COPY src/go.mod \
     src/go.sum \
@@ -35,12 +29,10 @@ COPY src/go.mod \
 
 WORKDIR /apps/go/
 
-ENV GOARM=7
-
 RUN go mod download
 ENV GOCACHE=/go-cache
 COPY src/ /apps/go/
 ARG GIT_SHA=unknown
 # Release version (e.g. 2.2.4); empty keeps the VERSION var compiled into the source.
 ARG VERSION=
-RUN --mount=type=cache,target=/go-cache go build -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION} -extldflags=-static" -tags netgo -o /openport-armv7 apps/openport/main.go
+RUN --mount=type=cache,target=/go-cache go build -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION} -extldflags=-static" -tags netgo,osusergo -o /openport-armv7 apps/openport/main.go

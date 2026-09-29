@@ -1,41 +1,27 @@
-FROM debian:buster
-# Using the oldest version of debian that supplies the armhf architecture. Ubuntu 16.04 does not support armhf.
+FROM debian:bookworm-slim
+LABEL os=linux
+LABEL arch=armhf
 
-MAINTAINER JanDeBleser
-
-# buster is out of LFS, we need to use the archive repos
-RUN sed -i 's|deb.debian.org|archive.debian.org|g' /etc/apt/sources.list
-RUN sed -i 's|security.debian.org|archive.debian.org|g' /etc/apt/sources.list
-RUN sed -i '/buster-updates/d' /etc/apt/sources.list
-
-RUN apt-get update && apt-get install -y software-properties-common wget gcc curl
+# The binary is linked fully statically (see the build flags below), so the
+# build distro's glibc version does not matter for compatibility with old
+# target systems.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        gcc-arm-linux-gnueabihf \
+        libc6-dev-armhf-cross \
+        wget \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
 RUN wget https://go.dev/dl/go1.26.8.linux-amd64.tar.gz && \
     rm -rf /usr/local/go &&  \
     tar -C /usr/local -xzf go1.26.8.linux-amd64.tar.gz
 ENV PATH=$PATH:/usr/local/go/bin
-
-LABEL os=linux
-LABEL arch=armhf
 
 ENV GOOS=linux
 ENV GOARCH=arm
 ENV GOARM=7
 ENV CGO_ENABLED=1
 ENV CC=arm-linux-gnueabihf-gcc
-ENV PATH="/go/bin/${GOOS}_${GOARCH}:${PATH}"
-ENV PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
-
-# install build & runtime dependencies
-RUN dpkg --add-architecture armhf \
-    && apt-get update \
-    && dpkg --configure -a \
-    && apt-get install -y --no-install-recommends \
-        protobuf-compiler \
-        upx \
-        libc6-dev-armhf-cross \
-   gcc-arm-linux-gnueabihf \
-        pkg-config curl \
-    && rm -rf /var/lib/apt/lists/*
 
 COPY src/go.mod \
     src/go.sum \
@@ -49,4 +35,4 @@ COPY src/ /apps/go/
 ARG GIT_SHA=unknown
 # Release version (e.g. 2.2.4); empty keeps the VERSION var compiled into the source.
 ARG VERSION=
-RUN --mount=type=cache,target=/go-cache go build -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION} -extldflags=-static" -tags netgo -o /openport-armhf apps/openport/main.go
+RUN --mount=type=cache,target=/go-cache go build -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION} -extldflags=-static" -tags netgo,osusergo -o /openport-armhf apps/openport/main.go
