@@ -1,20 +1,22 @@
 package openport
 
 import (
-	db "github.com/openportio/openport-go/database"
-	"github.com/openportio/openport-go/utils"
-	"github.com/stretchr/testify/assert"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	db "github.com/openportio/openport-go/database"
+	"github.com/openportio/openport-go/testutil"
+	"github.com/openportio/openport-go/utils"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestApp_getRestartCommand(t *testing.T) {
 	app := CreateApp()
 	dbFile := "test-files/tmp/openport-1.3.0.db"
 	_ = os.Remove(dbFile)
-	utils.FailOnError(CopyFile("test-files/openport-1.3.0.db", dbFile), "Could not copy file")
+	utils.FailOnError(testutil.CopyFile("test-files/openport-1.3.0.db", dbFile), "Could not copy file")
 	app.DbHandler.SetPath(dbFile)
 	session, err := app.DbHandler.GetSessionsToRestart()
 	utils.FailOnError(err, "Could not get sessions to restart")

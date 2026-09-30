@@ -1,11 +1,11 @@
-package openport
+// Package testutil holds test helpers shared across the project's test
+// packages. It lives in its own package (not a _test.go file in package
+// openport) so it can be imported by tests in other packages without pulling
+// the testing framework into the production openport binary.
+package testutil
 
 import (
 	"fmt"
-	"github.com/gorilla/mux"
-	"github.com/phayes/freeport"
-	log "github.com/sirupsen/logrus"
-	"github.com/stretchr/testify/assert"
 	"io"
 	"net/http"
 	"os"
@@ -13,6 +13,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gorilla/mux"
+	"github.com/phayes/freeport"
+	log "github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
 )
 
 func AssertEqual(t *testing.T, a interface{}, b interface{}) {
@@ -101,25 +106,6 @@ func CheckTcpForwardFails(t *testing.T, localPort int, server string, remotePort
 	_, err := httpClient.Get(fmt.Sprintf("http://%s:%d", server, remotePort))
 	if err == nil {
 		t.Fatalf("expected forward to fail")
-	}
-}
-
-func WaitForApp(t *testing.T, app *App) {
-	appReady := make(chan string, 1)
-
-	go func() {
-		for !app.ConnectedState.IsConnected() {
-			time.Sleep(10 * time.Millisecond)
-		}
-		appReady <- fmt.Sprintf("ok, got port %d", app.Session.RemotePort)
-	}()
-
-	select {
-	case res := <-appReady:
-		log.Info(res)
-	case <-time.After(15 * time.Second):
-		app.Stop(1)
-		t.Fatal("App did not connect in time")
 	}
 }
 
