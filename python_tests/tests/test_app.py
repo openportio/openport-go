@@ -2371,13 +2371,6 @@ class AppTestUDP(AppTests):
         click_open_for_ip_link(link)
         return port, remote_host, remote_port, p
 
-    def _check_udp_or_skip(self, remote_host, remote_port, local_port):
-        """Try a UDP echo round-trip. Skip the test if the server doesn't support UDP."""
-        if not udp_port_forward_available(remote_host, remote_port, local_port):
-            self.skipTest(
-                "Server does not support UDP forwarding yet — skipping"
-            )
-
     def test_udp_port_forward(self):
         """Basic test: expose a local port, verify UDP datagrams are forwarded."""
         port, remote_host, remote_port, p = self._setup_tunnel()
@@ -2388,7 +2381,6 @@ class AppTestUDP(AppTests):
         )
 
         # UDP should also work on the same remote host/port
-        self._check_udp_or_skip(remote_host, remote_port, port)
         check_udp_port_forward(
             self, remote_host=remote_host, local_port=port, remote_port=remote_port
         )
@@ -2396,8 +2388,6 @@ class AppTestUDP(AppTests):
     def test_udp_and_tcp_simultaneously(self):
         """Verify TCP and UDP both work on the same tunnel, interleaved."""
         port, remote_host, remote_port, p = self._setup_tunnel()
-
-        self._check_udp_or_skip(remote_host, remote_port, port)
 
         # Interleave TCP and UDP checks
         check_tcp_port_forward(
@@ -2415,8 +2405,6 @@ class AppTestUDP(AppTests):
         import socket as _socket
 
         port, remote_host, remote_port, p = self._setup_tunnel()
-
-        self._check_udp_or_skip(remote_host, remote_port, port)
 
         from tests.utils.utils import SimpleUdpEchoServer
 
