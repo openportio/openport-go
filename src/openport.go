@@ -8,7 +8,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/jedib0t/go-pretty/table"
 	"github.com/jedib0t/go-pretty/text"
-	_ "github.com/jinzhu/gorm/dialects/sqlite"
 	ogrek "github.com/kisielk/og-rek"
 	db "github.com/openportio/openport-go/database"
 	"github.com/openportio/openport-go/utils"
