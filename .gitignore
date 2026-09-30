@@ -27,6 +27,8 @@ _testmain.go
 
 openport-*
 openportw-*
+# but not the DB-migration fixtures created by old client versions
+!src/database/testdata/openport-*.db
 test.db
 src/tmp/
 test-results/

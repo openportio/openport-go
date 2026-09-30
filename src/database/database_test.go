@@ -1,9 +1,11 @@
 package database
 
 import (
+	"database/sql"
 	"os"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -159,4 +161,33 @@ func TestTwoHandlesOnOneFile(t *testing.T) {
 	active, err := first.GetAllActive()
 	require.NoError(t, err)
 	assert.Empty(t, active)
+}
+
+// mattn waited on a locked database where modernc fails immediately with
+// SQLITE_BUSY; the driver registration compensates with a busy timeout.
+// Without it, Save here errors with "database is locked" instead of
+// waiting for the concurrent writer to finish (seen in CI as a panic in
+// TestReverseTunnelWithWS, pipeline 1307).
+func TestWaitsWhileDatabaseIsLocked(t *testing.T) {
+	dbPath := path.Join(t.TempDir(), "openport.db")
+	handler := &DBHandler{DbPath: dbPath}
+	handler.InitDB()
+
+	locker, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer locker.Close()
+	tx, err := locker.Begin()
+	require.NoError(t, err)
+	_, err = tx.Exec("INSERT INTO sessions (local_port, active) VALUES (1, 1)")
+	require.NoError(t, err) // write lock is now held
+
+	release := time.AfterFunc(500*time.Millisecond, func() {
+		if err := tx.Commit(); err != nil {
+			t.Errorf("commit failed: %v", err)
+		}
+	})
+	defer release.Stop()
+
+	session := Session{LocalPort: 2222, RemotePort: 41500, Active: true}
+	require.NoError(t, handler.Save(&session), "writes must wait for the lock, not fail with SQLITE_BUSY")
 }
