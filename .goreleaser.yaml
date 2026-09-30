@@ -29,7 +29,7 @@ builds:
       - -X github.com/openportio/openport-go.VERSION={{ .Version }}
 
   # Separate build id: the armhf deb must ship the armv6 binary (armv7
-  # builds segfault on the pi zero, see docker_compile_all.sh), and nfpm
+  # builds segfault on the pi zero, see test_release_binaries.sh), and nfpm
   # maps arm6 -> deb arch "armhf" (verified with nfpm v2.43).
   - id: openport-armv6
     dir: src
