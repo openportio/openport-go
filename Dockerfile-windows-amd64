@@ -6,20 +6,15 @@ ENV GOVERSION="1.26.8"
 ENV GOOS=windows
 ENV GOARCH=amd64
 ENV GOPATH=/go
-ENV CGO_ENABLED=1
-ENV CC=x86_64-w64-mingw32-gcc
-ENV CXX=x86_64-w64-mingw32-g++
+ENV CGO_ENABLED=0
 ENV PATH="/go/bin:/usr/local/go/bin:${PATH}"
 
 # install build dependencies
 RUN set -ex \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential \
         ca-certificates \
-        gcc-mingw-w64-x86-64 \
         git \
-        pkg-config \
         wget \
     && rm -rf /var/lib/apt/lists/*
 
@@ -40,6 +35,6 @@ COPY src/ /apps/go/
 ARG GIT_SHA=unknown
 # Release version (e.g. 2.2.4); empty keeps the VERSION var compiled into the source.
 ARG VERSION=
-RUN --mount=type=cache,target=/go-cache go build -o /openport-windows-amd64.exe -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION} -extldflags=-static" apps/openport/main.go
-RUN --mount=type=cache,target=/go-cache go build -o /openportw-windows-amd64.exe -ldflags "-H=windowsgui -s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION} -extldflags=-static" apps/openport/main.go
-RUN --mount=type=cache,target=/go-cache go build -o /openport-service-windows-amd64.exe -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION} -extldflags=-static" apps/windows_service/main.go
+RUN --mount=type=cache,target=/go-cache go build -o /openport-windows-amd64.exe -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION}" apps/openport/main.go
+RUN --mount=type=cache,target=/go-cache go build -o /openportw-windows-amd64.exe -ldflags "-H=windowsgui -s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION}" apps/openport/main.go
+RUN --mount=type=cache,target=/go-cache go build -o /openport-service-windows-amd64.exe -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION}" apps/windows_service/main.go

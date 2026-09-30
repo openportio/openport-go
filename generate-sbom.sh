@@ -89,6 +89,8 @@ if [ "$SOURCE_ONLY" -eq 0 ]; then
     openport-armhf
     openport-armv6
     openport-armv7
+    openport-macos
+    openport-macos-arm64
     openport-windows-amd64.exe
     openportw-windows-amd64.exe
     openport-service-windows-amd64.exe

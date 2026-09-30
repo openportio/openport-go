@@ -4,13 +4,11 @@ LABEL arch=amd64
 
 ENV LANG=C.UTF-8
 
-# The binary is linked fully statically (see the build flags below), so the
-# build distro's glibc version does not matter for compatibility with old
-# target systems.
+# CGO_ENABLED=0 (no cgo since the switch to modernc.org/sqlite) yields a
+# fully static binary, so the build distro's glibc version does not matter
+# for compatibility with old target systems.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
-        gcc \
-        libc6-dev \
         wget \
         curl \
     && rm -rf /var/lib/apt/lists/*
@@ -22,6 +20,7 @@ ENV PATH=$PATH:/usr/local/go/bin
 WORKDIR /apps/go/
 
 ENV OPENPORT_EXE=/openport-amd64
+ENV CGO_ENABLED=0
 RUN go version
 RUN wget https://github.com/gotestyourself/gotestsum/releases/download/v1.11.0/gotestsum_1.11.0_linux_amd64.tar.gz && \
     tar -xf gotestsum*.gz && \
@@ -37,4 +36,4 @@ COPY src/ /apps/go/
 ARG GIT_SHA=unknown
 # Release version (e.g. 2.2.4); empty keeps the VERSION var compiled into the source.
 ARG VERSION=
-RUN --mount=type=cache,target=/go-cache go build -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION} -extldflags=-static" -tags netgo,osusergo -o /openport-amd64 apps/openport/main.go
+RUN --mount=type=cache,target=/go-cache go build -ldflags "-s -w -X github.com/openportio/openport-go.GitSha=${GIT_SHA}${VERSION:+ -X github.com/openportio/openport-go.VERSION=$VERSION}" -o /openport-amd64 apps/openport/main.go
