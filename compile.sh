@@ -3,7 +3,7 @@ set -ex
 cd "$(dirname "$0")/src"
 export PATH=$PATH:/usr/local/go/bin
 export HOME
-export CGO_ENABLED=1
+export CGO_ENABLED=0
 GIT_SHA=$(git rev-parse --short HEAD)
 if ! git diff --quiet HEAD; then
   GIT_SHA="$GIT_SHA-dirty"
