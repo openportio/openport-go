@@ -176,8 +176,9 @@ sbom:
 
 
 # ---------------------------------------------------------------------------
-# Release: push a tag vX.Y.Z and this job builds the linux binaries, packages
-# signed .debs, and publishes the apt repo to the web server. See RELEASE.md.
+# Release: push a tag vX.Y.Z and this job builds every target with goreleaser
+# (binaries, .deb/.rpm packages, archives, checksums, SBOMs) and publishes the
+# signed apt repo to the web server. See RELEASE.md and .goreleaser.yaml.
 #
 # Runs after test + scan, so a release that fails tests or ships a known
 # reachable vulnerability never goes out.
@@ -202,10 +203,7 @@ release:
     - test -n "$RELEASE_SSH_KEY" || { echo "RELEASE_SSH_KEY CI variable is missing"; false; }
     - test -n "$RELEASE_HOST" || { echo "RELEASE_HOST CI variable is missing"; false; }
     - export VERSION="${CI_COMMIT_TAG#v}"
-    - ./docker_compile.sh amd64
-    - ./docker_compile.sh armv6
-    - ./docker_compile.sh arm64
-    - ./packaging/build-debs.sh
+    - ./packaging/release.sh
     - chmod 600 "$RELEASE_SSH_KEY"
     - export APT_SIGNING_KEY_FILE="$APT_SIGNING_KEY"
     - export RELEASE_SSH_KEY_FILE="$RELEASE_SSH_KEY"
