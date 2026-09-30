@@ -750,7 +750,7 @@ func (app *App) CreateTunnel() {
 					log.Warn(err)
 				} else {
 					callback := func() {
-						app.Session.PrintMessage(response.Message)
+						app.Session.PrintMessage(response.Message, false)
 						app.MarkConnected()
 					}
 					app.passthrough.setInterrupt(func() { wsClient.Close() })
@@ -921,7 +921,6 @@ func (app *App) StartReverseTunnel(key ssh.Signer, session db.Session, message s
 		return err
 	}
 	defer listener.Close()
-	session.PrintMessage(message)
 	// ExitHook
 	stopFunc := func() {
 		log.Debug("Closing ssh connection and listeners")
@@ -937,7 +936,8 @@ func (app *App) StartReverseTunnel(key ssh.Signer, session db.Session, message s
 	defer app.passthrough.clearInterrupt()
 
 	// Also set up UDP forwarding on the same port, over the same SSH connection
-	app.startUDPChannelHandler(sshClient, session)
+	udpActive := app.startUDPChannelHandler(sshClient, session)
+	session.PrintMessage(message, udpActive)
 
 	app.MarkConnected()
 
@@ -970,7 +970,8 @@ func (app *App) StartReverseTunnel(key ssh.Signer, session db.Session, message s
 
 // startUDPChannelHandler requests the server to also listen on UDP for the same port,
 // and handles incoming "forwarded-udp" channels by forwarding datagrams to the local service.
-func (app *App) startUDPChannelHandler(sshClient *ssh.Client, session db.Session) {
+// Returns whether UDP forwarding is active on the server.
+func (app *App) startUDPChannelHandler(sshClient *ssh.Client, session db.Session) bool {
 	payload := ssh.Marshal(struct {
 		Host string
 		Port uint32
@@ -979,11 +980,11 @@ func (app *App) startUDPChannelHandler(sshClient *ssh.Client, session db.Session
 	ok, replyData, err := sshClient.Conn.SendRequest("udpip-forward", true, payload)
 	if err != nil {
 		log.Warnf("UDP forwarding not available: %s", err)
-		return
+		return false
 	}
 	if !ok {
 		log.Warn("UDP forwarding request rejected by server")
-		return
+		return false
 	}
 
 	// ok alone proves nothing: deployed servers ack *every* unknown global
@@ -997,19 +998,16 @@ func (app *App) startUDPChannelHandler(sshClient *ssh.Client, session db.Session
 	}{}
 	if len(replyData) == 0 || ssh.Unmarshal(replyData, &reply) != nil {
 		log.Infof("The server does not support UDP forwarding; only TCP is forwarded on remote port %d.", session.RemotePort)
-		return
+		return false
 	}
-	if reply.Host != "" {
-		log.Infof("UDP forwarding enabled on %s:%d", reply.Host, session.RemotePort)
-	} else {
-		log.Infof("UDP forwarding enabled on remote port %d", session.RemotePort)
-	}
+	log.Debugf("UDP forwarding enabled on %s:%d", reply.Host, session.RemotePort)
 
 	go func() {
 		for newChannel := range sshClient.HandleChannelOpen("forwarded-udp") {
 			go handleUDPChannel(newChannel, session.LocalPort)
 		}
 	}()
+	return true
 }
 
 func handleUDPChannel(newChannel ssh.NewChannel, localPort int) {

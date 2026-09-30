@@ -77,7 +77,7 @@ func (s Session) TunnelDialAddress() string {
 	return fmt.Sprintf("localhost:%d", s.LocalPort)
 }
 
-func (s Session) PrintMessage(message string) {
+func (s Session) PrintMessage(message string, udpActive bool) {
 	if s.TlsPassthrough {
 		address := s.HttpForwardAddress
 		if s.CustomDomain != "" {
@@ -91,7 +91,11 @@ func (s Session) PrintMessage(message string) {
 	} else if s.HttpForward {
 		log.Infof("Now forwarding remote address %s to localhost", s.HttpForwardAddress)
 	} else {
-		log.Infof("Now forwarding remote port %s:%d to localhost:%d", s.SshServer, s.RemotePort, s.LocalPort)
+		suffix := ""
+		if udpActive {
+			suffix = " (tcp & udp)"
+		}
+		log.Infof("Now forwarding remote port %s:%d to localhost:%d%s", s.SshServer, s.RemotePort, s.LocalPort, suffix)
 	}
 	log.Info(message)
 }

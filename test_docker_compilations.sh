@@ -12,7 +12,7 @@ ssh pi-zero ./openport-armv6 selftest
 
 # armv7
 ./docker_compile.sh armv7
-scp openport-armv7 router:
+scp -O openport-armv7 router:
 ssh router ./openport-armv7 selftest
 
 # arm64
