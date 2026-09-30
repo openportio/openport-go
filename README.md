@@ -19,7 +19,7 @@ What builds what, and where the output lands:
 | `./packaging/release.sh` | Same, but a real release: requires HEAD to be a `vX.Y.Z` tag (normally done by CI — see `RELEASE.md`) | `dist/` |
 | `VERSION=x.y.z SKIP_UPLOAD=1 ./packaging/publish-apt.sh` | Builds the signed apt repository from the debs in `dist/` without uploading | `packaging/build/apt/` |
 | `VERSION=x.y.z ./packaging/publish-apt.sh` | Publishes that apt repo + checksums + SBOMs to the web server and refreshes the `openport_latest_*` symlinks | `releases/` on the server |
-| `./jenkins.sh` | The full CI test run: Go test suite + python e2e tests, both in docker compose | `test-results/` |
+| `./run_tests.sh` | The full CI test run: Go test suite + python e2e tests, both in docker compose | `test-results/` |
 | `cd python_tests && make test` | Python e2e tests only | terminal |
 | `./test_release_binaries.sh` | `openport selftest` with the goreleaser binaries: amd64 locally, armv6/armv7/arm64 on real hardware over ssh (pi-zero, router, mk4) | terminal |
 | `./generate-sbom.sh [--source]` | SBOMs for the source tree and local dev builds (release SBOMs come from `release.sh`) | `sbom/` |

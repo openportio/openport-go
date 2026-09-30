@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the CI test image (Dockerfile-amd64) and copies the linux amd64
-# binary it contains to ./openport-amd64. jenkins.sh and the python e2e
+# binary it contains to ./openport-amd64. run_tests.sh and the python e2e
 # tests rely on both.
 #
 # This is the only per-arch docker build left: all release binaries come

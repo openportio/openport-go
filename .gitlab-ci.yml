@@ -1,4 +1,4 @@
-# Replaces the Jenkinsfile. Runs on a shell-executor GitLab Runner that has
+# Runs on a shell-executor GitLab Runner that has
 # docker + docker-compose-plugin + yq (Python) + openssl available (see
 # gitlab_installation/runner/cloud-init.yaml).
 #
@@ -22,7 +22,7 @@ test:
   # blocks the fresh one).
   interruptible: true
   variables:
-    # Deterministic compose project name (jenkins.sh honours it) so that
+    # Deterministic compose project name (run_tests.sh honours it) so that
     # after_script can tear the stack down again. Without this a cancelled
     # job -- routine now that the pipeline is interruptible -- leaks a
     # running compose stack with live tunnels that no later cleanup touches:
@@ -32,7 +32,7 @@ test:
     - rm -rf test-results
     - mkdir -p test-results
   script:
-    - ./jenkins.sh
+    - ./run_tests.sh
   after_script:
     # GitLab runs after_script on cancel as well: take down whichever compose
     # stack (Go or Python tests, same project name) was still running.
@@ -40,7 +40,7 @@ test:
     # Containers write reports and .pyc caches as root into the bind-mounted
     # source tree. Chown back so the next job's git clean -fdx succeeds.
     - docker run --rm -v "$PWD":/work alpine sh -c "chown -R $(id -u):$(id -g) /work" || true
-    # Reclaim disk on the small runner droplet (mirrors Jenkinsfile post.always).
+    # Reclaim disk on the small runner droplet.
     - docker system prune -f || true
     - docker volume prune -f || true
   artifacts:

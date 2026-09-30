@@ -25,8 +25,8 @@ bin() {
 scp "$(bin 'openport-armv6_linux_arm_6')" pi-zero:openport-armv6
 ssh pi-zero ./openport-armv6 selftest
 
-# armv7
-scp "$(bin 'openport-armv7_linux_arm_7')" router:openport-armv7
+# armv7 (-O: the router only speaks the legacy scp protocol, not sftp)
+scp -O "$(bin 'openport-armv7_linux_arm_7')" router:openport-armv7
 ssh router ./openport-armv7 selftest
 
 # arm64
