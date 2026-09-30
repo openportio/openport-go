@@ -11,6 +11,14 @@
 #   ./packaging/release.sh              # real release: requires HEAD == a vX.Y.Z tag
 #   SNAPSHOT=1 ./packaging/release.sh   # local test build from any commit
 #
+# Extra arguments are passed to "goreleaser release", e.g.
+#   ./packaging/release.sh --skip=validate    # dirty tree, but real tag version
+# (goreleaser v2 spells the old --skip-validate as --skip=validate.)
+#
+# Run it from a normal clone for local tests: in a git worktree the
+# container only sees the worktree directory, not the shared .git, so the
+# version comes out as 0.0.1 / commit "none".
+#
 # Only docker is required on the host; the goreleaser/syft/gpg environment
 # is built as an image from packaging/Dockerfile-goreleaser.
 
@@ -24,6 +32,7 @@ ARGS=(release --clean)
 if [ "$SNAPSHOT" = 1 ]; then
   ARGS+=(--snapshot)
 fi
+ARGS+=("$@")
 
 docker build -q -f packaging/Dockerfile-goreleaser -t "$IMAGE" packaging >/dev/null
 
