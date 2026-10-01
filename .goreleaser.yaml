@@ -21,6 +21,11 @@ builds:
     main: ./apps/openport
     binary: openport
     env: [CGO_ENABLED=0]
+    # -trimpath drops the build's filesystem paths from the binary, so an
+    # independent rebuild (the offline signer's reproducibility check)
+    # matches CI's bytes. Required; see openport-distribution's
+    # docs/release-architecture.md.
+    flags: &flags [-trimpath]
     goos: [linux, darwin]
     goarch: [amd64, arm64]
     ldflags: &ldflags
@@ -39,6 +44,7 @@ builds:
     goos: [linux]
     goarch: [arm]
     goarm: ["6"]
+    flags: *flags
     ldflags: *ldflags
 
   # armv7 is shipped as a bare archive only: nfpm would also call it
@@ -51,6 +57,7 @@ builds:
     goos: [linux]
     goarch: [arm]
     goarm: ["7"]
+    flags: *flags
     ldflags: *ldflags
 
   - id: openport-windows
@@ -58,6 +65,7 @@ builds:
     main: ./apps/openport
     binary: openport
     env: [CGO_ENABLED=0]
+    flags: *flags
     goos: [windows]
     goarch: [amd64]
     ldflags: *ldflags
@@ -68,6 +76,7 @@ builds:
     main: ./apps/openport
     binary: openportw
     env: [CGO_ENABLED=0]
+    flags: *flags
     goos: [windows]
     goarch: [amd64]
     ldflags:
@@ -80,6 +89,7 @@ builds:
     main: ./apps/windows_service
     binary: openport-service
     env: [CGO_ENABLED=0]
+    flags: *flags
     goos: [windows]
     goarch: [amd64]
     ldflags: *ldflags
