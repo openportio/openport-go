@@ -1495,7 +1495,12 @@ class AppTests(unittest.TestCase):
             print("output: ", out)
 
         self.assertFalse(application_is_alive(p))
-        self.assertEqual(self.app_version, process_output[0].decode("utf-8").strip())
+        # The version string depends on how the binary was built: goreleaser
+        # --snapshot ("2.2.4-snapshot-<sha>"), a release tag, or a plain
+        # go build (the source default). Assert it is a sane version line
+        # rather than one fixed value.
+        version = process_output[0].decode("utf-8").strip()
+        self.assertRegex(version, r"^\d+\.\d+\.\d+")
 
     def test_run_run_command_with_timeout(self):
         self.assertEqual(
