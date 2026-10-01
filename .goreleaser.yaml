@@ -1,0 +1,205 @@
+# Release configuration, run by packaging/release.sh (locally: SNAPSHOT=1) —
+# replaces docker_compile.sh + packaging/build-debs.sh for releases.
+# The per-arch Dockerfiles remain for dev builds and the CI test image.
+#
+# Everything cross-compiles with CGO_ENABLED=0 since the switch to
+# modernc.org/sqlite; no C toolchains are involved.
+version: 2
+
+project_name: openport
+
+before:
+  hooks:
+    # The deb ships the apt keyring in binary form; derive it from the
+    # committed armored key (see packaging/generate-apt-key.sh).
+    - mkdir -p packaging/build
+    - sh -c "gpg --dearmor < packaging/openport-archive-keyring.asc > packaging/build/openport-archive-keyring.gpg"
+
+builds:
+  - id: openport
+    dir: src
+    main: ./apps/openport
+    binary: openport
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags: &ldflags
+      - -s -w
+      - -X github.com/openportio/openport-go.GitSha={{ .ShortCommit }}
+      - -X github.com/openportio/openport-go.VERSION={{ .Version }}
+
+  # Separate build id: the armhf deb must ship the armv6 binary (armv7
+  # builds segfault on the pi zero, see test_release_binaries.sh), and nfpm
+  # maps arm6 -> deb arch "armhf" (verified with nfpm v2.43).
+  - id: openport-armv6
+    dir: src
+    main: ./apps/openport
+    binary: openport
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [arm]
+    goarm: ["6"]
+    ldflags: *ldflags
+
+  # armv7 is shipped as a bare archive only: nfpm would also call it
+  # "armhf", colliding with the armv6-based deb above.
+  - id: openport-armv7
+    dir: src
+    main: ./apps/openport
+    binary: openport
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [arm]
+    goarm: ["7"]
+    ldflags: *ldflags
+
+  - id: openport-windows
+    dir: src
+    main: ./apps/openport
+    binary: openport
+    env: [CGO_ENABLED=0]
+    goos: [windows]
+    goarch: [amd64]
+    ldflags: *ldflags
+
+  # GUI-subsystem variant: no console window when started from the desktop.
+  - id: openportw-windows
+    dir: src
+    main: ./apps/openport
+    binary: openportw
+    env: [CGO_ENABLED=0]
+    goos: [windows]
+    goarch: [amd64]
+    ldflags:
+      - -s -w -H=windowsgui
+      - -X github.com/openportio/openport-go.GitSha={{ .ShortCommit }}
+      - -X github.com/openportio/openport-go.VERSION={{ .Version }}
+
+  - id: openport-service-windows
+    dir: src
+    main: ./apps/windows_service
+    binary: openport-service
+    env: [CGO_ENABLED=0]
+    goos: [windows]
+    goarch: [amd64]
+    ldflags: *ldflags
+
+# Two nfpm entries (see the former packaging/nfpm.yaml) because formats
+# differ per architecture set: amd64/arm64 get deb + rpm, the armv6 build
+# only a deb (there is no armv6 rpm audience, and rpm would label it
+# oddly). The second entry inherits everything from the first via the
+# anchor and overrides only id/ids/formats.
+nfpms:
+  - &nfpm_common
+    id: packages
+    ids: [openport]
+    formats: [deb, rpm]
+    # openport_2.2.4-1_amd64.deb / openport-2.2.4-1.x86_64.rpm — the names
+    # publish-apt.sh and the website's download symlinks are built around
+    # (goreleaser's default would name packages like the archives).
+    file_name_template: "{{ .ConventionalFileName }}"
+    package_name: openport
+    vendor: Openport
+    section: net
+    priority: optional
+    maintainer: Jan De Bleser <jan@openport.io>
+    homepage: https://openport.io
+    license: MIT
+    description: |-
+      Expose local ports to the internet.
+      Openport creates a tunnel from openport.io to a port on your machine,
+      so you can reach it from anywhere.
+    release: "1"
+    bindir: /usr/bin
+    scripts:
+      postinstall: packaging/scripts/postinstall.sh
+      preremove: packaging/scripts/preremove.sh
+    contents:
+      # Per-port template unit: systemctl enable --now openport@22
+      - src: openport@.service
+        dst: /lib/systemd/system/openport@.service
+        file_info:
+          mode: 0644
+      # Boot unit that restarts --restart-on-reboot sessions.
+      - src: packaging/openport.service
+        dst: /lib/systemd/system/openport.service
+        file_info:
+          mode: 0644
+    overrides:
+      deb:
+        # Chrome-style repo self-enrolment: installing the deb configures the
+        # signed apt repo, so every install — including the existing "dpkg -i"
+        # user base, once they take this version — gets future updates via
+        # apt. The deb-only contents replace the common list, so the systemd
+        # units are repeated here.
+        contents:
+          - src: openport@.service
+            dst: /lib/systemd/system/openport@.service
+            file_info:
+              mode: 0644
+          - src: packaging/openport.service
+            dst: /lib/systemd/system/openport.service
+            file_info:
+              mode: 0644
+          - src: packaging/build/openport-archive-keyring.gpg
+            dst: /usr/share/keyrings/openport-archive-keyring.gpg
+            file_info:
+              mode: 0644
+          - src: packaging/openport.list
+            dst: /etc/apt/sources.list.d/openport.list
+            type: config
+            file_info:
+              mode: 0644
+  - <<: *nfpm_common
+    id: packages-armhf
+    ids: [openport-armv6]
+    formats: [deb]
+
+archives:
+  - id: unix
+    ids: [openport, openport-armv6, openport-armv7]
+    formats: [tar.gz]
+    name_template: "openport_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}"
+  - id: windows
+    ids: [openport-windows, openportw-windows, openport-service-windows]
+    formats: [zip]
+    name_template: "openport_{{ .Version }}_windows_amd64"
+
+# Bare per-artifact files so "sha256sum -c" works next to a download;
+# publish-apt.sh uploads the *.deb.sha256 ones.
+checksum:
+  algorithm: sha256
+  split: true
+
+# CRA Annex I Part II(1). Per-binary SBOMs are authoritative: syft reads the
+# module metadata Go embeds in the binary, which reflects what actually
+# shipped. CycloneDX is the primary published format, SPDX secondary.
+sboms:
+  - id: package-cyclonedx
+    artifacts: package
+    documents: ["{{ .ArtifactName }}.cdx.json"]
+    args: ["$artifact", "--source-name", "openport-client", "--output", "cyclonedx-json=$document"]
+  - id: package-spdx
+    artifacts: package
+    documents: ["{{ .ArtifactName }}.spdx.json"]
+    args: ["$artifact", "--source-name", "openport-client", "--output", "spdx-json=$document"]
+  - id: binary-cyclonedx
+    artifacts: binary
+    documents: ["{{ .Binary }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}.cdx.json"]
+    args: ["$artifact", "--source-name", "openport-client", "--output", "cyclonedx-json=$document"]
+  - id: binary-spdx
+    artifacts: binary
+    documents: ["{{ .Binary }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}.spdx.json"]
+    args: ["$artifact", "--source-name", "openport-client", "--output", "spdx-json=$document"]
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+changelog:
+  disable: true
+
+# Publishing is the signed apt repo + website symlinks (packaging/
+# publish-apt.sh, run by the CI release job after this) — not GitLab
+# releases. The dist/ tree is kept as a CI artifact.
+release:
+  disable: true

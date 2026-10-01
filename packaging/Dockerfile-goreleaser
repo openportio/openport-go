@@ -1,0 +1,27 @@
+# Release environment for packaging/release.sh: goreleaser + syft + gpg on
+# top of the Go toolchain. Built on the runner (only docker is guaranteed
+# there); both tools are built from source via the Go module proxy, so their
+# integrity is verified against the module checksum database instead of
+# trusting a downloaded binary.
+# goreleaser v2.18 requires go >= 1.27; the project itself still targets the
+# go.mod version, which a newer toolchain builds fine.
+FROM golang:1.27.1-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Renovate is not wired up for Dockerfile go-install pins; bump these
+# alongside go.mod updates.
+ENV GOBIN=/usr/local/bin
+RUN go install github.com/goreleaser/goreleaser/v2@v2.18.2 && \
+    go install github.com/anchore/syft/cmd/syft@v1.52.0 && \
+    go clean -cache -modcache
+
+# The repo is bind-mounted at /repo; it is owned by the host user while the
+# container runs as root, which git refuses without this.
+ENV GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0=safe.directory \
+    GIT_CONFIG_VALUE_0=/repo
+
+WORKDIR /repo

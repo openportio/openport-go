@@ -43,7 +43,7 @@ ARCHES="amd64 armhf arm64"
 }
 command -v rsync >/dev/null || { echo "ERROR: rsync is required" >&2; exit 1; }
 ls dist/openport_*.deb >/dev/null 2>&1 || {
-  echo "ERROR: no debs in dist/ -- run packaging/build-debs.sh first" >&2
+  echo "ERROR: no debs in dist/ -- run packaging/release.sh first" >&2
   exit 1
 }
 
