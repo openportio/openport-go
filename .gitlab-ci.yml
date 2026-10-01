@@ -177,18 +177,20 @@ sbom:
 
 # ---------------------------------------------------------------------------
 # Release: push a tag vX.Y.Z and this job builds every target with goreleaser
-# (binaries, .deb/.rpm packages, archives, checksums, SBOMs) and publishes the
-# signed apt repo to the web server. See RELEASE.md and .goreleaser.yaml.
+# (binaries, .deb/.rpm packages, archives, checksums, SBOMs) and uploads the
+# UNSIGNED dist/ to this project's GitLab package registry as
+# openport-build/<version>.
+#
+# This job does NOT sign and does NOT touch any server: signing is done
+# offline by a human (packaging/sign-release.sh), and the web server pulls the
+# signed result from a public GitHub release. The job therefore holds no
+# signing key and no server credential — see RELEASE.md and
+# openport-distribution's docs/release-architecture.md.
 #
 # Runs after test + scan, so a release that fails tests or ships a known
-# reachable vulnerability never goes out.
-#
-# Required CI variables (Settings → CI/CD → Variables, protected — and the
-# v* tags must be protected too, or the variables are not exposed):
-#   APT_SIGNING_KEY   file — armored GPG private key (packaging/generate-apt-key.sh)
-#   RELEASE_SSH_KEY   file — ssh private key authorized on the web server
-#   RELEASE_HOST      e.g. "jan@openport.io" (home dir holds releases/)
-#   RELEASE_SSH_PORT  optional, e.g. "23"
+# reachable vulnerability never goes out. Uploads use the automatic
+# CI_JOB_TOKEN (scoped to this project's own registry); no variable to set,
+# and the v* tag need not be protected for this job.
 # ---------------------------------------------------------------------------
 
 release:
@@ -198,16 +200,25 @@ release:
   timeout: 1h
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+  variables:
+    PKG_NAME: openport-build
   script:
-    - test -n "$APT_SIGNING_KEY" || { echo "APT_SIGNING_KEY CI variable is missing (is the tag protected?)"; false; }
-    - test -n "$RELEASE_SSH_KEY" || { echo "RELEASE_SSH_KEY CI variable is missing"; false; }
-    - test -n "$RELEASE_HOST" || { echo "RELEASE_HOST CI variable is missing"; false; }
     - export VERSION="${CI_COMMIT_TAG#v}"
     - ./packaging/release.sh
-    - chmod 600 "$RELEASE_SSH_KEY"
-    - export APT_SIGNING_KEY_FILE="$APT_SIGNING_KEY"
-    - export RELEASE_SSH_KEY_FILE="$RELEASE_SSH_KEY"
-    - ./packaging/publish-apt.sh
+    # Upload every artifact to the generic package registry. CI_JOB_TOKEN is
+    # scoped to this project and needs no configuration. The signer pulls this
+    # with their own credentials; prod never touches it.
+    - |
+      base="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PKG_NAME}/${VERSION}"
+      for f in dist/*; do
+        [ -f "$f" ] || continue
+        name="$(basename "$f")"
+        echo "uploading $name"
+        curl --fail --silent --show-error \
+          --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+          --upload-file "$f" \
+          "${base}/${name}"
+      done
   after_script:
     - docker run --rm -v "$PWD":/work alpine sh -c "chown -R $(id -u):$(id -g) /work" || true
   artifacts:
