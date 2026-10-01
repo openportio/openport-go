@@ -1,22 +1,25 @@
 package main
 
 import (
-	"github.com/openportio/openport-go"
-	log "github.com/sirupsen/logrus"
-	"github.com/stretchr/testify/assert"
+	"fmt"
 	"os"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/openportio/openport-go"
+	"github.com/openportio/openport-go/testutil"
+	log "github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
 )
 
 const TEST_SERVER = "https://test.openport.io"
 
-var OPENPORT_EXE = openport.DefaultEnv("OPENPORT_EXE", "/home/jan/workspace/openport-go-client/openport-amd64")
+var OPENPORT_EXE = testutil.DefaultEnv("OPENPORT_EXE", "/home/jan/workspace/openport-go-client/openport-amd64")
 
 func TestReverseTunnel(t *testing.T) {
 	dbFile := "tmp/TestReverseTunnel.db"
-	port := openport.GetFreePort(t)
+	port := testutil.GetFreePort(t)
 	app := openport.CreateApp()
 	defer app.Stop(0)
 
@@ -28,14 +31,14 @@ func TestReverseTunnel(t *testing.T) {
 		"--database", dbFile,
 		"--exit-on-failure-timeout", "10",
 	})
-	openport.WaitForApp(t, app)
-	openport.ClickLink(t, app.Session.OpenPortForIpLink)
-	openport.CheckTcpForward(t, port, app.Session.SshServer, app.Session.RemotePort)
+	waitForApp(t, app)
+	testutil.ClickLink(t, app.Session.OpenPortForIpLink)
+	testutil.CheckTcpForward(t, port, app.Session.SshServer, app.Session.RemotePort)
 }
 
 func TestReverseTunnelWithWS(t *testing.T) {
 	dbFile := "tmp/TestReverseTunnel.db"
-	port := openport.GetFreePort(t)
+	port := testutil.GetFreePort(t)
 	app := openport.CreateApp()
 	defer app.Stop(0)
 
@@ -48,13 +51,13 @@ func TestReverseTunnelWithWS(t *testing.T) {
 		"--ws",
 		"--exit-on-failure-timeout", "10",
 	})
-	openport.WaitForApp(t, app)
-	openport.ClickLink(t, app.Session.OpenPortForIpLink)
-	openport.CheckTcpForward(t, port, app.Session.SshServer, app.Session.RemotePort)
+	waitForApp(t, app)
+	testutil.ClickLink(t, app.Session.OpenPortForIpLink)
+	testutil.CheckTcpForward(t, port, app.Session.SshServer, app.Session.RemotePort)
 }
 func TestReverseTunnelWithWSNoSSL(t *testing.T) {
 	dbFile := "tmp/TestReverseTunnel.db"
-	port := openport.GetFreePort(t)
+	port := testutil.GetFreePort(t)
 	app := openport.CreateApp()
 	defer app.Stop(0)
 
@@ -68,9 +71,9 @@ func TestReverseTunnelWithWSNoSSL(t *testing.T) {
 		"--no-ssl",
 		"--exit-on-failure-timeout", "10",
 	})
-	openport.WaitForApp(t, app)
-	openport.ClickLink(t, app.Session.OpenPortForIpLink)
-	openport.CheckTcpForward(t, port, app.Session.SshServer, app.Session.RemotePort)
+	waitForApp(t, app)
+	testutil.ClickLink(t, app.Session.OpenPortForIpLink)
+	testutil.CheckTcpForward(t, port, app.Session.SshServer, app.Session.RemotePort)
 }
 
 func TestSaveForwardTunnel(t *testing.T) {
@@ -83,7 +86,7 @@ func TestSaveForwardTunnel(t *testing.T) {
 	killAllApp := openport.CreateApp()
 	defer run(killAllApp, []string{OPENPORT_EXE, "kill-all", "--database", dbFile})
 
-	port := openport.GetFreePort(t)
+	port := testutil.GetFreePort(t)
 
 	reverseApp := openport.CreateApp()
 	defer reverseApp.Stop(0)
@@ -96,12 +99,12 @@ func TestSaveForwardTunnel(t *testing.T) {
 		"--database", dbFile,
 		"--restart-on-reboot",
 	})
-	openport.WaitForApp(t, reverseApp)
-	openport.ClickLink(t, reverseApp.Session.OpenPortForIpLink)
-	openport.CheckTcpForward(t, port, reverseApp.Session.SshServer, reverseApp.Session.RemotePort)
-	openport.AssertEqual(t, true, reverseApp.Session.Connected)
+	waitForApp(t, reverseApp)
+	testutil.ClickLink(t, reverseApp.Session.OpenPortForIpLink)
+	testutil.CheckTcpForward(t, port, reverseApp.Session.SshServer, reverseApp.Session.RemotePort)
+	testutil.AssertEqual(t, true, reverseApp.Session.Connected)
 
-	forwardPort := openport.GetFreePort(t)
+	forwardPort := testutil.GetFreePort(t)
 
 	forwardApp := openport.CreateApp()
 	defer forwardApp.Stop(0)
@@ -117,35 +120,35 @@ func TestSaveForwardTunnel(t *testing.T) {
 		"--restart-on-reboot",
 	})
 
-	openport.WaitForApp(t, forwardApp)
+	waitForApp(t, forwardApp)
 
-	openport.CheckTcpForward(t, port, "127.0.0.1", forwardPort)
-	openport.AssertEqual(t, true, forwardApp.Session.Connected)
+	testutil.CheckTcpForward(t, port, "127.0.0.1", forwardPort)
+	testutil.AssertEqual(t, true, forwardApp.Session.Connected)
 
 	activeSessions, err := forwardApp.DbHandler.GetAllActive()
-	openport.FailIfError(t, err)
-	openport.AssertEqual(t, 2, len(activeSessions))
+	testutil.FailIfError(t, err)
+	testutil.AssertEqual(t, 2, len(activeSessions))
 	allConnected := true
 	for _, session := range activeSessions {
 		allConnected = allConnected && session.Connected
 	}
-	openport.AssertEqual(t, true, allConnected)
+	testutil.AssertEqual(t, true, allConnected)
 
 	forwardApp.Stop(0)
 	getExitCode := func() string {
 		return strconv.Itoa(<-forwardApp.ExitCode)
 	}
-	assert.Equal(t, "0", openport.TimeoutFunction(t, getExitCode, 3*time.Second))
+	assert.Equal(t, "0", testutil.TimeoutFunction(t, getExitCode, 3*time.Second))
 	time.Sleep(500 * time.Millisecond)
 
-	openport.CheckTcpForwardFails(t, port, "127.0.0.1", forwardPort)
+	testutil.CheckTcpForwardFails(t, port, "127.0.0.1", forwardPort)
 	activeSessions, err = forwardApp.DbHandler.GetAllActive()
-	openport.FailIfError(t, err)
-	openport.AssertEqual(t, 1, len(activeSessions))
+	testutil.FailIfError(t, err)
+	testutil.AssertEqual(t, 1, len(activeSessions))
 
 	sessionsToRestart, err := forwardApp.DbHandler.GetSessionsToRestart()
-	openport.FailIfError(t, err)
-	openport.AssertEqual(t, 2, len(sessionsToRestart))
+	testutil.FailIfError(t, err)
+	testutil.AssertEqual(t, 2, len(sessionsToRestart))
 
 	// Restarting app
 	restartShares := func() string {
@@ -157,13 +160,13 @@ func TestSaveForwardTunnel(t *testing.T) {
 		})
 		return "ok"
 	}
-	openport.TimeoutFunction(t, restartShares, 2*time.Second)
+	testutil.TimeoutFunction(t, restartShares, 2*time.Second)
 
 	waitForActiveSessions := func() string {
 		endTicker := time.NewTicker(20 * time.Second)
 		for {
 			activeSessions, err := forwardApp.DbHandler.GetAllActive()
-			openport.FailIfError(t, err)
+			testutil.FailIfError(t, err)
 			if len(activeSessions) == 2 {
 				allConnected := true
 				for _, session := range activeSessions {
@@ -182,10 +185,10 @@ func TestSaveForwardTunnel(t *testing.T) {
 			}
 		}
 	}
-	openport.AssertEqual(t, "ok", openport.TimeoutFunction(t, waitForActiveSessions, 20*time.Second))
+	testutil.AssertEqual(t, "ok", testutil.TimeoutFunction(t, waitForActiveSessions, 20*time.Second))
 	time.Sleep(500 * time.Millisecond)
 
-	openport.CheckTcpForward(t, port, "127.0.0.1", forwardPort)
+	testutil.CheckTcpForward(t, port, "127.0.0.1", forwardPort)
 }
 
 func TestConnectionTimeout(t *testing.T) {
@@ -198,7 +201,7 @@ func TestConnectionTimeout(t *testing.T) {
 	killAllApp := openport.CreateApp()
 	defer run(killAllApp, []string{OPENPORT_EXE, "kill-all", "--database", dbFile})
 
-	port := openport.GetFreePort(t)
+	port := testutil.GetFreePort(t)
 
 	reserveApp := openport.CreateApp()
 	defer reserveApp.Stop(0)
@@ -216,7 +219,7 @@ func TestConnectionTimeout(t *testing.T) {
 	waitForExitCode := func() string {
 		return strconv.Itoa(<-reserveApp.ExitCode)
 	}
-	openport.AssertEqual(t, strconv.Itoa(openport.EXIT_CODE_NO_CONNECTION), openport.TimeoutFunction(t, waitForExitCode, 2*time.Second))
+	testutil.AssertEqual(t, strconv.Itoa(openport.EXIT_CODE_NO_CONNECTION), testutil.TimeoutFunction(t, waitForExitCode, 2*time.Second))
 
 	assert.True(t, time.Now().After(start.Add(500*time.Millisecond)), "App exited to quickly")
 	// TODO: does this still work after a restart
@@ -247,7 +250,7 @@ func TestConnectionTimeoutWithSuccessfulConnection(t *testing.T) {
 	killAllApp := openport.CreateApp()
 	defer run(killAllApp, []string{OPENPORT_EXE, "kill-all", "--database", dbFile})
 
-	port := openport.GetFreePort(t)
+	port := testutil.GetFreePort(t)
 
 	reserveApp := openport.CreateApp()
 	defer reserveApp.Stop(0)
@@ -305,5 +308,25 @@ func TestRewriteFlagValue(t *testing.T) {
 	}
 	for _, c := range cases {
 		assert.Equal(t, c.want, rewriteFlagValue(c.in, "--tls-cert", "/abs/cert.pem"), c.name)
+	}
+}
+
+// waitForApp blocks until the app connects (or times out). Kept here in the
+// test package because it depends on openport.App; the App-independent helpers
+// live in the shared testutil package.
+func waitForApp(t *testing.T, app *openport.App) {
+	appReady := make(chan string, 1)
+	go func() {
+		for !app.ConnectedState.IsConnected() {
+			time.Sleep(10 * time.Millisecond)
+		}
+		appReady <- fmt.Sprintf("ok, got port %d", app.Session.RemotePort)
+	}()
+	select {
+	case res := <-appReady:
+		log.Info(res)
+	case <-time.After(15 * time.Second):
+		app.Stop(1)
+		t.Fatal("App did not connect in time")
 	}
 }

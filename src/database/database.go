@@ -2,12 +2,13 @@ package database
 
 import (
 	"errors"
-	"fmt"
-	"github.com/jinzhu/gorm"
 	"path"
+
+	"github.com/jinzhu/gorm"
+
+	"github.com/openportio/openport-go/utils"
+	log "github.com/sirupsen/logrus"
 )
-import log "github.com/sirupsen/logrus"
-import "github.com/openportio/openport-go/utils"
 
 var DEFAULT_OPENPORT_DB_PATH = path.Join(utils.OPENPORT_HOME, "openport.db")
 
@@ -65,39 +66,6 @@ type Session struct {
 	NoSSL                 bool
 
 	Connected bool
-}
-
-// TunnelDialAddress is the local address incoming tunnel connections are
-// proxied to: the in-process TLS terminator when passthrough is active,
-// the forwarded service itself otherwise.
-func (s Session) TunnelDialAddress() string {
-	if s.TlsProxyPort != 0 {
-		return fmt.Sprintf("127.0.0.1:%d", s.TlsProxyPort)
-	}
-	return fmt.Sprintf("localhost:%d", s.LocalPort)
-}
-
-func (s Session) PrintMessage(message string, udpActive bool) {
-	if s.TlsPassthrough {
-		address := s.HttpForwardAddress
-		if s.CustomDomain != "" {
-			address = s.CustomDomain
-		}
-		if s.LocalTLS {
-			log.Infof("Now forwarding https://%s to localhost:%d (end-to-end TLS; your local service holds the certificate)", address, s.LocalPort)
-		} else {
-			log.Infof("Now forwarding https://%s to localhost:%d (TLS terminates on this machine)", address, s.LocalPort)
-		}
-	} else if s.HttpForward {
-		log.Infof("Now forwarding remote address %s to localhost", s.HttpForwardAddress)
-	} else {
-		suffix := ""
-		if udpActive {
-			suffix = " (tcp & udp)"
-		}
-		log.Infof("Now forwarding remote port %s:%d to localhost:%d%s", s.SshServer, s.RemotePort, s.LocalPort, suffix)
-	}
-	log.Info(message)
 }
 
 type DBHandlerInterface interface {
