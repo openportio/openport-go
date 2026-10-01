@@ -58,6 +58,11 @@ GITHUB_REMOTE="${GITHUB_REMOTE:-github}"
 PKG_NAME="${PKG_NAME:-openport-build}"
 POOL_ARCHIVE="${POOL_ARCHIVE:-$HOME/.openport-release/pool}"
 APT_SIGNING_KEY_FILE="${APT_SIGNING_KEY_FILE:-$HOME/.openport-release/apt-signing-key.asc}"
+# Drop the signed mac .pkg / Windows installer .exe here to attach them to the
+# release (option (b): do it later and re-run this script; it re-signs
+# SHA256SUMS and re-uploads with --clobber).
+EXTRA_ASSETS_DIR="${EXTRA_ASSETS_DIR:-$HOME/.openport-release/assets/$VERSION}"
+RPM_SIGN_IMAGE="${RPM_SIGN_IMAGE:-fedora:40}"
 : "${GITLAB_TOKEN:?set GITLAB_TOKEN to a read_api token for the client project}"
 
 API="$GITLAB_URL/api/v4"
@@ -134,23 +139,79 @@ SKIP_UPLOAD=1 VERSION="$VERSION" APT_SIGNING_KEY_FILE="$APT_SIGNING_KEY_FILE" \
 # Archive this release's debs for the next run's index.
 cp -n dist/openport_*.deb "$POOL_ARCHIVE"/ 2>/dev/null || true
 
-echo "==> 4. pack the signed release tarball"
+echo "==> 3b. GPG-sign the rpm(s) with the openport key"
+# rpmsign stores a header-signature so `rpm --checksig` / dnf verify the rpm
+# against the same key as the apt repo. Done in a container because rpm-sign is
+# not on a Debian signer. The key has no passphrase (see generate-apt-key.sh),
+# so gpg runs with loopback and an empty passphrase.
+if ls dist/*.rpm >/dev/null 2>&1; then
+  docker run --rm \
+    -v "$PWD/dist":/dist \
+    -v "$(readlink -f "$APT_SIGNING_KEY_FILE")":/signing-key.asc:ro \
+    "$RPM_SIGN_IMAGE" bash -ec '
+      dnf -yq install rpm-sign gnupg2 >/dev/null
+      export GNUPGHOME=$(mktemp -d)
+      gpg --batch --quiet --import /signing-key.asc
+      fpr=$(gpg --list-secret-keys --with-colons | awk -F: "/^fpr:/{print \$10; exit}")
+      cat > /root/.rpmmacros <<RPMMACROS
+%_gpg_name $fpr
+%_gpg_path $GNUPGHOME
+%__gpg_sign_cmd %{__gpg} gpg --batch --pinentry-mode loopback --passphrase "" --no-armor --no-secmem-warning -u "%{_gpg_name}" -sbo %{__signature_filename} --digest-algo sha256 %{__plaintext_filename}
+RPMMACROS
+      rpmsign --addsign /dist/*.rpm
+      rpm --import /signing-key.asc
+      for r in /dist/*.rpm; do echo "  checksig $r:"; rpm --checksig "$r"; done
+    '
+  # host owns dist/ already (release.sh chowned it); re-checksum signed rpms
+  ( cd dist && for r in *.rpm; do sha256sum "$r" > "$r.sha256"; done )
+else
+  echo "    (no rpm in dist/)"
+fi
+
+echo "==> 4. assemble release assets + a GPG-signed SHA256SUMS"
+ASSETS="$WORK/assets"; mkdir -p "$ASSETS"
+# 4a. the signed apt tree, packed as one tarball (what the pull agent unpacks)
 STAGE="$WORK/openport-apt"; mkdir -p "$STAGE/apt" "$STAGE/checksums" "$STAGE/sbom"
 rsync -a packaging/build/apt/ "$STAGE/apt/"
 cp dist/*.deb.sha256 "$STAGE/checksums/" 2>/dev/null || true
 cp dist/*.cdx.json dist/*.spdx.json "$STAGE/sbom/" 2>/dev/null || true
-TARBALL="openport-apt-$VERSION.tar.gz"
-tar -C "$STAGE/.." -czf "$TARBALL" openport-apt
-echo "    wrote $TARBALL"
+tar -C "$STAGE/.." -czf "$ASSETS/openport-apt-$VERSION.tar.gz" openport-apt
+# 4b. the signed rpms, as-is
+cp dist/*.rpm "$ASSETS/" 2>/dev/null || true
+# 4c. mac .pkg / Windows installer .exe, if they have been dropped in
+if [ -d "$EXTRA_ASSETS_DIR" ]; then
+  find "$EXTRA_ASSETS_DIR" -maxdepth 1 -type f \( -name '*.pkg' -o -name '*.exe' \) \
+    -exec cp {} "$ASSETS/" \;
+fi
+# 4d. one SHA256SUMS over every asset, clearsigned with the apt key. The pull
+# agent verifies THIS against the committed key, then checks each file — so the
+# same committed-key trust that protects the deb covers rpm/pkg/exe too.
+export GNUPGHOME="$WORK/sumsgpg"; mkdir -p "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
+gpg --batch --quiet --import "$APT_SIGNING_KEY_FILE"
+sums_fpr="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/{print $10; exit}')"
+# Exclude SHA256SUMS* from its own listing (the > would otherwise glob it in).
+( cd "$ASSETS"
+  mapfile -t _f < <(find . -maxdepth 1 -type f ! -name 'SHA256SUMS*' -printf '%P\n' | sort)
+  sha256sum -- "${_f[@]}" > SHA256SUMS )
+gpg --batch --yes --pinentry-mode loopback --passphrase "" -u "$sums_fpr" \
+  --clearsign -o "$ASSETS/SHA256SUMS.asc" "$ASSETS/SHA256SUMS"
+unset GNUPGHOME
+echo "    assets:"; ls -1 "$ASSETS" | sed 's/^/      /'
 
-echo "==> 5. push tag to GitHub and create a DRAFT release"
+echo "==> 5. push tag to GitHub and create/update the DRAFT release"
 git push "$GITHUB_REMOTE" "$TAG"
-gh release create "$TAG" "$TARBALL" \
-  --repo "$GITHUB_REPO" \
-  --draft \
-  --title "Openport $VERSION" \
-  --notes "Signed apt repository for openport $VERSION. Published automatically to the apt repo by the pull agent once this draft is published."
+if gh release view "$TAG" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
+  gh release upload "$TAG" "$ASSETS"/* --repo "$GITHUB_REPO" --clobber
+else
+  gh release create "$TAG" "$ASSETS"/* \
+    --repo "$GITHUB_REPO" --draft \
+    --title "Openport $VERSION" \
+    --notes "Signed release for openport $VERSION (deb repo + rpm, and mac/windows installers when attached). The web server pulls and verifies these against the committed signing key once this draft is published."
+fi
 
 echo
 echo "Done. Review the DRAFT release at https://github.com/$GITHUB_REPO/releases"
-echo "Publish it (un-draft) to go live; the prod pull agent converges within ~2 min."
+echo "To add the mac .pkg / Windows .exe later: drop the signed files in"
+echo "  $EXTRA_ASSETS_DIR"
+echo "and re-run this script (it re-signs SHA256SUMS and re-uploads). Publish the"
+echo "draft to go live; the prod pull agent converges within ~2 min."
