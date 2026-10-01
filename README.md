@@ -36,6 +36,11 @@ openport-distribution repo. Full usage docs: https://openport.readthedocs.io/en/
 
 ## Repo commands
 
+**Local setup**: copy each `.env.example` to `.env` next to it and fill it in —
+the repo root and `python_tests/docker-compose/` ones feed the docker-compose
+test stacks, `packaging/` feeds the release scripts. The `.env` files are
+gitignored; never commit them.
+
 What builds what, and where the output lands:
 
 | Command | What it does | Output |
