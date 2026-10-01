@@ -159,7 +159,10 @@ if ls dist/*.rpm >/dev/null 2>&1; then
 %__gpg_sign_cmd %{__gpg} gpg --batch --pinentry-mode loopback --passphrase "" --no-armor --no-secmem-warning -u "%{_gpg_name}" -sbo %{__signature_filename} --digest-algo sha256 %{__plaintext_filename}
 RPMMACROS
       rpmsign --addsign /dist/*.rpm
-      rpm --import /signing-key.asc
+      # Self-check: import the PUBLIC half (derived from the secret key) and
+      # verify. rpm --import needs the public key, not the secret-key file.
+      gpg --batch --armor --export "$fpr" > /tmp/openport-pub.asc
+      rpm --import /tmp/openport-pub.asc
       for r in /dist/*.rpm; do echo "  checksig $r:"; rpm --checksig "$r"; done
     '
   # host owns dist/ already (release.sh chowned it); re-checksum signed rpms
