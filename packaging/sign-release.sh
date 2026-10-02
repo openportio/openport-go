@@ -107,8 +107,18 @@ pkg_id="$("${CURL[@]}" -G \
   "$API/projects/$GITLAB_PROJECT/packages" \
   | python3 -c 'import json,sys; p=[x for x in json.load(sys.stdin) if x["version"]==sys.argv[1]]; print(p[0]["id"] if p else "")' "$VERSION")"
 [ -n "$pkg_id" ] || { echo "ERROR: no $PKG_NAME package for version $VERSION" >&2; exit 1; }
-files="$("${CURL[@]}" "$API/projects/$GITLAB_PROJECT/packages/$pkg_id/package_files" \
-  | python3 -c 'import json,sys; [print(f["file_name"]) for f in json.load(sys.stdin)]')"
+# package_files paginates (default 20/page) and the build has 80+ files:
+# without walking every page the debs and tarballs silently go missing, which
+# made the reproducibility check compare nothing and "verify" vacuously.
+files=""
+page=1
+while :; do
+  chunk="$("${CURL[@]}" "$API/projects/$GITLAB_PROJECT/packages/$pkg_id/package_files?per_page=100&page=$page" \
+    | python3 -c 'import json,sys; [print(f["file_name"]) for f in json.load(sys.stdin)]')"
+  [ -n "$chunk" ] || break
+  files="$files $chunk"
+  page=$((page + 1))
+done
 for name in $files; do
   "${CURL[@]}" -o "$CI_DIR/$name" \
     "$API/projects/$GITLAB_PROJECT/packages/generic/$PKG_NAME/$VERSION/$name"
@@ -122,8 +132,10 @@ echo "==> 2b. reproducibility: rebuild locally and compare binaries"
 ./packaging/release.sh >/dev/null
 # Compare the Go binary inside each .deb CI shipped against our local rebuild.
 mismatch=0
+compared=0
 for ci_deb in "$CI_DIR"/openport_*.deb; do
   [ -e "$ci_deb" ] || continue
+  compared=$((compared + 1))
   name="$(basename "$ci_deb")"
   local_deb="dist/$name"
   [ -f "$local_deb" ] || { echo "    MISSING local rebuild of $name" >&2; mismatch=1; continue; }
@@ -142,7 +154,13 @@ if [ "$mismatch" != 0 ]; then
   echo "       Investigate with diffoscope before proceeding." >&2
   exit 1
 fi
-echo "    reproducibility verified"
+# Zero comparisons means CI's debs never arrived (e.g. a pagination bug in the
+# download): that is a broken check, not a passing one.
+if [ "$compared" -eq 0 ]; then
+  echo "ERROR: no CI debs found in $CI_DIR — nothing was compared, refusing to sign." >&2
+  exit 1
+fi
+echo "    reproducibility verified ($compared debs)"
 
 echo "==> 3. build + sign the apt repository (key stays local)"
 # Seed dist/ with every previously-released deb so the signed index lists all
@@ -203,6 +221,30 @@ if [ -d "$EXTRA_ASSETS_DIR" ]; then
   find "$EXTRA_ASSETS_DIR" -maxdepth 1 -type f \( -name '*.pkg' -o -name '*.exe' \) \
     -exec cp {} "$ASSETS/" \;
 fi
+# 4c2. raw binaries from CI's verified build, published next to the packages
+# as the 2.2.x releases did. Windows: openport*-windows-amd64.exe — the pull
+# agent gives the openport_latest_windows.exe symlink only to the
+# Openport_<ver>.exe installer, never to these. Linux: openport-<arch>.
+win_zip="$CI_DIR/openport_${VERSION}_windows_amd64.zip"
+if [ -f "$win_zip" ]; then
+  win_raw="$WORK/win_raw"; mkdir -p "$win_raw"
+  python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \
+    "$win_zip" "$win_raw"
+  for n in openport openportw openport-service; do
+    [ -f "$win_raw/$n.exe" ] && cp "$win_raw/$n.exe" "$ASSETS/$n-windows-amd64.exe"
+  done
+fi
+for arch in amd64 arm64 armv6 armv7; do
+  linux_tar="$CI_DIR/openport_${VERSION}_linux_${arch}.tar.gz"
+  [ -f "$linux_tar" ] || continue
+  linux_raw="$WORK/linux_raw_$arch"; mkdir -p "$linux_raw"
+  tar -xzf "$linux_tar" -C "$linux_raw"
+  bin="$(find "$linux_raw" -maxdepth 2 -type f -name openport | head -1)"
+  [ -n "$bin" ] && cp "$bin" "$ASSETS/openport-$arch"
+done
+# openport-armhf stays an alias of the armv6 binary (pi zero), matching the
+# armhf deb and the 2.2.x release asset names.
+[ -f "$ASSETS/openport-armv6" ] && cp "$ASSETS/openport-armv6" "$ASSETS/openport-armhf"
 # 4d. one SHA256SUMS over every asset, clearsigned with the apt key. The pull
 # agent verifies THIS against the committed key, then checks each file — so the
 # same committed-key trust that protects the deb covers rpm/pkg/exe too.
