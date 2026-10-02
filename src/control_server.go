@@ -14,7 +14,6 @@ func (app *App) StopSession(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintln(w, "Ok")
 	app.Stop(EXIT_CODE_REMOTE_STOP)
 
-	// TODO: stop session from restarting.  Done?
 	// TODO: Force flag
 }
 

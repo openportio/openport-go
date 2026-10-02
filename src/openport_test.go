@@ -51,6 +51,53 @@ func TestApp_getRestartCommand_badPickles(t *testing.T) {
 	}
 }
 
+// Stopping a session on purpose (ctrl-c, "openport kill") must clear its
+// restart command, or "restart-sessions" revives it on the next reboot. The
+// cleanup has to happen inside Stop itself: main() calls os.Exit as soon as
+// the exit code arrives, so deferred cleanup never runs.
+func TestStop_intentionalStopClearsRestartCommand(t *testing.T) {
+	testCases := []struct {
+		name            string
+		exitCode        int
+		expectRestarted bool
+	}{
+		{"interrupted", EXIT_CODE_INTERRUPTED, false},
+		{"remote stop", EXIT_CODE_REMOTE_STOP, false},
+		{"connection failure keeps restart command", EXIT_CODE_NO_CONNECTION, true},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			dbFile := "test-files/tmp/stop-clears-restart-" + strings.ReplaceAll(testCase.name, " ", "-") + ".db"
+			_ = os.Remove(dbFile)
+			app := CreateApp()
+			app.DbHandler.SetPath(dbFile)
+			app.DbHandler.InitDB()
+			app.Session = db.Session{
+				LocalPort:      22,
+				RestartCommand: "22 -R",
+				Active:         true,
+			}
+			utils.FailOnError(app.DbHandler.Save(&app.Session), "Could not save session")
+			assert.NotEqual(t, int64(0), app.Session.ID)
+
+			app.Stop(testCase.exitCode)
+
+			toRestart, err := app.DbHandler.GetSessionsToRestart()
+			utils.FailOnError(err, "Could not get sessions to restart")
+			stored, err := app.DbHandler.GetSession(22)
+			utils.FailOnError(err, "Could not get session")
+			if testCase.expectRestarted {
+				assert.Len(t, toRestart, 1)
+				assert.Equal(t, "22 -R", stored.RestartCommand)
+			} else {
+				assert.Empty(t, toRestart)
+				assert.Equal(t, "", stored.RestartCommand)
+				assert.False(t, stored.Active)
+			}
+		})
+	}
+}
+
 func waitForConnectedState(t *testing.T, app *App, connected bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
