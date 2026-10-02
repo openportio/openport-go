@@ -229,7 +229,7 @@ release:
       done
   after_script:
     - docker run --rm -v "$PWD":/work alpine sh -c "chown -R $(id -u):$(id -g) /work" || true
-  artifacts:
-    paths:
-      - dist/
-    expire_in: 1 year
+  # No job artifact: the full dist/ (all arches + packages + archives + SBOMs)
+  # exceeds the coordinator's artifact size limit (413 Request Entity Too
+  # Large), and it is redundant — everything is uploaded to the package
+  # registry as openport-build/<version> above, which is what the signer pulls.
