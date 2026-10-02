@@ -107,8 +107,18 @@ pkg_id="$("${CURL[@]}" -G \
   "$API/projects/$GITLAB_PROJECT/packages" \
   | python3 -c 'import json,sys; p=[x for x in json.load(sys.stdin) if x["version"]==sys.argv[1]]; print(p[0]["id"] if p else "")' "$VERSION")"
 [ -n "$pkg_id" ] || { echo "ERROR: no $PKG_NAME package for version $VERSION" >&2; exit 1; }
-files="$("${CURL[@]}" "$API/projects/$GITLAB_PROJECT/packages/$pkg_id/package_files" \
-  | python3 -c 'import json,sys; [print(f["file_name"]) for f in json.load(sys.stdin)]')"
+# package_files paginates (default 20/page) and the build has 80+ files:
+# without walking every page the debs and tarballs silently go missing, which
+# made the reproducibility check compare nothing and "verify" vacuously.
+files=""
+page=1
+while :; do
+  chunk="$("${CURL[@]}" "$API/projects/$GITLAB_PROJECT/packages/$pkg_id/package_files?per_page=100&page=$page" \
+    | python3 -c 'import json,sys; [print(f["file_name"]) for f in json.load(sys.stdin)]')"
+  [ -n "$chunk" ] || break
+  files="$files $chunk"
+  page=$((page + 1))
+done
 for name in $files; do
   "${CURL[@]}" -o "$CI_DIR/$name" \
     "$API/projects/$GITLAB_PROJECT/packages/generic/$PKG_NAME/$VERSION/$name"
@@ -122,8 +132,10 @@ echo "==> 2b. reproducibility: rebuild locally and compare binaries"
 ./packaging/release.sh >/dev/null
 # Compare the Go binary inside each .deb CI shipped against our local rebuild.
 mismatch=0
+compared=0
 for ci_deb in "$CI_DIR"/openport_*.deb; do
   [ -e "$ci_deb" ] || continue
+  compared=$((compared + 1))
   name="$(basename "$ci_deb")"
   local_deb="dist/$name"
   [ -f "$local_deb" ] || { echo "    MISSING local rebuild of $name" >&2; mismatch=1; continue; }
@@ -142,7 +154,13 @@ if [ "$mismatch" != 0 ]; then
   echo "       Investigate with diffoscope before proceeding." >&2
   exit 1
 fi
-echo "    reproducibility verified"
+# Zero comparisons means CI's debs never arrived (e.g. a pagination bug in the
+# download): that is a broken check, not a passing one.
+if [ "$compared" -eq 0 ]; then
+  echo "ERROR: no CI debs found in $CI_DIR — nothing was compared, refusing to sign." >&2
+  exit 1
+fi
+echo "    reproducibility verified ($compared debs)"
 
 echo "==> 3. build + sign the apt repository (key stays local)"
 # Seed dist/ with every previously-released deb so the signed index lists all
