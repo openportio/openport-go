@@ -203,7 +203,10 @@ sboms:
     args: ["$artifact", "--source-name", "openport-client", "--output", "spdx-json=$document"]
 
 snapshot:
-  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+  # Keep this short: the server caps client_version at 10 chars and rejects
+  # longer values, failing every python_tests session start. The commit is
+  # still in the binary via the GitSha ldflag ("openport version" prints it).
+  version_template: "{{ incpatch .Version }}-dev"
 
 changelog:
   disable: true
