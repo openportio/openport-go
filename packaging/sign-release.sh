@@ -14,9 +14,10 @@
 #   3. builds + signs the apt repository from the locally rebuilt binaries
 #      (via publish-apt.sh SKIP_UPLOAD=1 — same signing logic as before),
 #   4. packs the signed tree + checksums + SBOMs into openport-apt-<ver>.tar.gz,
-#   5. pushes ONLY the vX.Y.Z tag to GitHub and creates a DRAFT release with
-#      that tarball attached. Publishing the draft (the go-live gate) is a
-#      separate manual step; the prod pull agent only sees published releases.
+#   5. pushes the vX.Y.Z tag to GitHub, fast-forwards the public main to the
+#      release commit, and creates a DRAFT release with that tarball attached.
+#      Publishing the draft (the go-live gate) is a separate manual step; the
+#      prod pull agent only sees published releases.
 #
 # The host reaches out to GitLab (read, own credentials) and GitHub (write,
 # own token). It never connects to a production server.
@@ -218,8 +219,17 @@ gpg --batch --yes --pinentry-mode loopback --passphrase "" -u "$sums_fpr" \
 unset GNUPGHOME
 echo "    assets:"; ls -1 "$ASSETS" | sed 's/^/      /'
 
-echo "==> 5. push tag to GitHub and create/update the DRAFT release"
+echo "==> 5. push tag + main to GitHub and create/update the DRAFT release"
 git push "$GITHUB_REMOTE" "$TAG"
+# Keep the public main at the release commit — fast-forward only, never force.
+# A re-run for an older tag must not move a newer main back, and a diverged
+# main (history rewrite) fails the push and has to be reconciled by hand.
+git fetch "$GITHUB_REMOTE" main
+if git merge-base --is-ancestor "$TAG^{commit}" FETCH_HEAD; then
+  echo "    main on $GITHUB_REMOTE already contains $TAG — not moving it"
+else
+  git push "$GITHUB_REMOTE" "$TAG^{commit}:refs/heads/main"
+fi
 if gh release view "$TAG" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
   gh release upload "$TAG" "$ASSETS"/* --repo "$GITHUB_REPO" --clobber
 else
