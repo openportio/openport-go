@@ -203,6 +203,30 @@ if [ -d "$EXTRA_ASSETS_DIR" ]; then
   find "$EXTRA_ASSETS_DIR" -maxdepth 1 -type f \( -name '*.pkg' -o -name '*.exe' \) \
     -exec cp {} "$ASSETS/" \;
 fi
+# 4c2. raw binaries from CI's verified build, published next to the packages
+# as the 2.2.x releases did. Windows: openport*-windows-amd64.exe — the pull
+# agent gives the openport_latest_windows.exe symlink only to the
+# Openport_<ver>.exe installer, never to these. Linux: openport-<arch>.
+win_zip="$CI_DIR/openport_${VERSION}_windows_amd64.zip"
+if [ -f "$win_zip" ]; then
+  win_raw="$WORK/win_raw"; mkdir -p "$win_raw"
+  python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \
+    "$win_zip" "$win_raw"
+  for n in openport openportw openport-service; do
+    [ -f "$win_raw/$n.exe" ] && cp "$win_raw/$n.exe" "$ASSETS/$n-windows-amd64.exe"
+  done
+fi
+for arch in amd64 arm64 armv6 armv7; do
+  linux_tar="$CI_DIR/openport_${VERSION}_linux_${arch}.tar.gz"
+  [ -f "$linux_tar" ] || continue
+  linux_raw="$WORK/linux_raw_$arch"; mkdir -p "$linux_raw"
+  tar -xzf "$linux_tar" -C "$linux_raw"
+  bin="$(find "$linux_raw" -maxdepth 2 -type f -name openport | head -1)"
+  [ -n "$bin" ] && cp "$bin" "$ASSETS/openport-$arch"
+done
+# openport-armhf stays an alias of the armv6 binary (pi zero), matching the
+# armhf deb and the 2.2.x release asset names.
+[ -f "$ASSETS/openport-armv6" ] && cp "$ASSETS/openport-armv6" "$ASSETS/openport-armhf"
 # 4d. one SHA256SUMS over every asset, clearsigned with the apt key. The pull
 # agent verifies THIS against the committed key, then checks each file — so the
 # same committed-key trust that protects the deb covers rpm/pkg/exe too.
