@@ -69,6 +69,11 @@ test:
     - shell
   timeout: 30m
   interruptible: true
+  # The scan jobs analyse the source tree and need no artifacts from earlier
+  # stages. Without this they default to downloading the test job's artifacts,
+  # and a stalled runner->coordinator fetch there has burned ~25 of the 30
+  # minutes (govulncheck then times out before it even starts). Skip it.
+  dependencies: []
   before_script:
     - mkdir -p security-reports
   after_script:
@@ -200,6 +205,9 @@ release:
   timeout: 1h
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+  # Builds from source via release.sh; needs no artifacts from test/scan, so
+  # skip the download (same stalled-fetch avoidance as the scan jobs).
+  dependencies: []
   variables:
     PKG_NAME: openport-build
   script:
