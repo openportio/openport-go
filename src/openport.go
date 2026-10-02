@@ -255,8 +255,25 @@ func (app *App) Stop(exitCode int) {
 	for i := app.StopHooks.Front(); i != nil; i = i.Next() {
 		i.Value.(func())()
 	}
+	if exitCode == EXIT_CODE_INTERRUPTED {
+		app.markSessionStopped()
+	}
 	app.ExitCode <- exitCode
-	//app.SetInactive(app.Session)
+}
+
+// markSessionStopped records that the user stopped this session on purpose
+// (ctrl-c), so "restart-sessions" must not bring it back. It must run before
+// the exit code is pushed: main() calls os.Exit as soon as it receives it,
+// which skips deferred cleanup. Only SIGINT counts as stopping for good:
+// "openport kill" (EXIT_CODE_REMOTE_STOP) keeps the session active and
+// restartable (test_restart_shares relies on that), and a reboot or kill -9
+// never gets here, which is what makes --restart-on-reboot work.
+func (app *App) markSessionStopped() {
+	if app.Session.ID == 0 {
+		return
+	}
+	app.Session.RestartCommand = ""
+	app.DbHandler.SetInactive(&app.Session)
 }
 
 func (app *App) RunSelfTest() {

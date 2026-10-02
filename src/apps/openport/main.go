@@ -65,7 +65,7 @@ func run(app *o.App, args []string) {
 	}
 
 	addSharedFlags := func(set *flag.FlagSet) {
-		set.IntVar(&port, "port", -1, "Sames as 'local-port'")
+		set.IntVar(&port, "port", -1, "Same as 'local-port'")
 		set.StringVar(&remotePort, "remote-port", "-1", "The server and port you want to expose locally. [openport.io:1234]")
 		set.IntVar(&controlPort, "listener-port", -1, "")
 		set.BoolVarP(&restartOnReboot, "restart-on-reboot", "R", false, "Restart this session when 'restart-sessions' is called (on boot for example).")
