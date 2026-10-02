@@ -73,6 +73,18 @@ for tool in docker git gh curl python3 rsync gpg dpkg-deb; do
 done
 [ -f "$APT_SIGNING_KEY_FILE" ] || {
   echo "ERROR: signing key not found at $APT_SIGNING_KEY_FILE" >&2; exit 1; }
+# The signing key must be the pair of the committed public keyring: a
+# mismatched key (e.g. after a rotation that missed a copy) signs a release
+# that the pull agent — or worse, every installed apt client — then rejects.
+_fpr() { gpg --batch --with-colons --show-keys "$1" 2>/dev/null \
+  | awk -F: '/^fpr:/{print $10; exit}'; }
+key_fpr="$(_fpr "$APT_SIGNING_KEY_FILE")"
+keyring_fpr="$(_fpr packaging/openport-archive-keyring.asc)"
+[ -n "$key_fpr" ] && [ "$key_fpr" = "$keyring_fpr" ] || {
+  echo "ERROR: $APT_SIGNING_KEY_FILE (fpr ${key_fpr:-unreadable}) does not match" >&2
+  echo "       packaging/openport-archive-keyring.asc (fpr ${keyring_fpr:-unreadable})." >&2
+  echo "       Refusing to sign with a key clients will not trust." >&2
+  exit 1; }
 [ "$(git describe --tags --exact-match 2>/dev/null || true)" = "$TAG" ] || {
   echo "ERROR: HEAD is not on tag $TAG — check out the tag you are signing" >&2
   exit 1; }
