@@ -29,6 +29,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Local config: packaging/.env (gitignored, see packaging/.env.example) is
+# sourced if present; absent in CI, so this is a no-op there.
+[ -f packaging/.env ] && { set -a; . ./packaging/.env; set +a; }
+
 VERSION=${VERSION:?set VERSION, e.g. VERSION=2.2.4}
 APT_SIGNING_KEY_FILE=${APT_SIGNING_KEY_FILE:-$HOME/.openport-release/apt-signing-key.asc}
 RELEASE_HOST=${RELEASE_HOST:-openport}

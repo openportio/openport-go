@@ -43,6 +43,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Local config: packaging/.env (gitignored, see packaging/.env.example) is
+# sourced if present. Write entries as VAR="${VAR:-value}" so explicitly
+# exported values still win.
+[ -f packaging/.env ] && { set -a; . ./packaging/.env; set +a; }
+
 VERSION="${VERSION:-}"
 if [ -z "$VERSION" ]; then
   _tag="$(git describe --tags --exact-match 2>/dev/null || true)"

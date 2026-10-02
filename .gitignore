@@ -53,3 +53,6 @@ packaging/build/
 # The apt repo public key IS committed -- the openport-* pattern above would
 # otherwise swallow it.
 !packaging/openport-archive-keyring.asc
+# Local environment files -- never commit (this repo is public); commit a
+# matching .env.example instead.
+.env
