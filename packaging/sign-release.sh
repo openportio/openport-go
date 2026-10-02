@@ -64,9 +64,10 @@ GITHUB_REMOTE="${GITHUB_REMOTE:-github}"
 PKG_NAME="${PKG_NAME:-openport-build}"
 POOL_ARCHIVE="${POOL_ARCHIVE:-$HOME/.openport-release/pool}"
 APT_SIGNING_KEY_FILE="${APT_SIGNING_KEY_FILE:-$HOME/.openport-release/apt-signing-key.asc}"
-# Drop the signed mac .pkg / Windows installer .exe here to attach them to the
-# release (option (b): do it later and re-run this script; it re-signs
-# SHA256SUMS and re-uploads with --clobber).
+# Drop the signed mac .pkg/.dmg / Windows installer .exe here to attach them
+# to the release (option (b): do it later and re-run this script; it re-signs
+# SHA256SUMS and re-uploads with --clobber). A dmg here replaces the unsigned
+# one CI built (4b2).
 EXTRA_ASSETS_DIR="${EXTRA_ASSETS_DIR:-$HOME/.openport-release/assets/$VERSION}"
 RPM_SIGN_IMAGE="${RPM_SIGN_IMAGE:-fedora:40}"
 : "${GITLAB_TOKEN:?set GITLAB_TOKEN to a read_api token for the client project}"
@@ -217,9 +218,17 @@ cp dist/*.cdx.json dist/*.spdx.json "$STAGE/sbom/" 2>/dev/null || true
 tar -C "$STAGE/.." -czf "$ASSETS/openport-apt-$VERSION.tar.gz" openport-apt
 # 4b. the signed rpms, as-is
 cp dist/*.rpm "$ASSETS/" 2>/dev/null || true
-# 4c. mac .pkg / Windows installer .exe, if they have been dropped in
+# 4b2. the unsigned mac installer CI built (packaging/macos/), transport-
+# verified by the checksums in 2a. It is not repro-rebuilt: nothing in it is
+# signed, and the binary inside comes from the same CI archives the signer
+# already trusts for the raw downloads (4c2). The website's pull agent gives
+# it the openport_latest_macos.dmg name.
+cp "$CI_DIR"/Openport_*.dmg "$ASSETS/" 2>/dev/null || true
+# 4c. mac .pkg/.dmg / Windows installer .exe, if they have been dropped in
+# (a signed dmg here overwrites CI's unsigned one)
 if [ -d "$EXTRA_ASSETS_DIR" ]; then
-  find "$EXTRA_ASSETS_DIR" -maxdepth 1 -type f \( -name '*.pkg' -o -name '*.exe' \) \
+  find "$EXTRA_ASSETS_DIR" -maxdepth 1 -type f \
+    \( -name '*.pkg' -o -name '*.dmg' -o -name '*.exe' \) \
     -exec cp {} "$ASSETS/" \;
 fi
 # 4c2. raw binaries from CI's verified build, published next to the packages
@@ -283,7 +292,7 @@ fi
 
 echo
 echo "Done. Review the DRAFT release at https://github.com/$GITHUB_REPO/releases"
-echo "To add the mac .pkg / Windows .exe later: drop the signed files in"
+echo "To add a signed mac .pkg/.dmg / Windows .exe later: drop the files in"
 echo "  $EXTRA_ASSETS_DIR"
 echo "and re-run this script (it re-signs SHA256SUMS and re-uploads). Publish the"
 echo "draft to go live; the prod pull agent converges within ~2 min."
