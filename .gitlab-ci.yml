@@ -213,6 +213,11 @@ release:
   script:
     - export VERSION="${CI_COMMIT_TAG#v}"
     - ./packaging/release.sh
+    # Unsigned mac installer: Openport_<ver>.dmg (flat pkg inside), built on
+    # Linux from the darwin archives release.sh just put in dist/ — see
+    # packaging/macos/. Lands in dist/ so the registry upload below ships it
+    # and the offline signer attaches it to the GitHub release.
+    - ./packaging/macos/build-dmg.sh
     # Upload every artifact to the generic package registry. CI_JOB_TOKEN is
     # scoped to this project and needs no configuration. The signer pulls this
     # with their own credentials; prod never touches it.
