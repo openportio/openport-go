@@ -17,6 +17,16 @@ const TEST_SERVER = "https://test.openport.io"
 
 var OPENPORT_EXE = testutil.DefaultEnv("OPENPORT_EXE", "/home/jan/workspace/openport-go-client/openport-amd64")
 
+// TestMain creates the tmp dir the tests keep their databases in. It is
+// gitignored, so a fresh checkout does not have it, and sqlite does not
+// create missing directories.
+func TestMain(m *testing.M) {
+	if err := os.MkdirAll("tmp", 0o755); err != nil {
+		panic(err)
+	}
+	os.Exit(m.Run())
+}
+
 func TestReverseTunnel(t *testing.T) {
 	dbFile := "tmp/TestReverseTunnel.db"
 	port := testutil.GetFreePort(t)
@@ -192,7 +202,6 @@ func TestSaveForwardTunnel(t *testing.T) {
 }
 
 func TestForwardTunnelExec(t *testing.T) {
-	testutil.FailIfError(t, os.MkdirAll("tmp", 0o755))
 	dbFile := "tmp/TestForwardTunnelExec.db"
 	port := testutil.GetFreePort(t)
 
