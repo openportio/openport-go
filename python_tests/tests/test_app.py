@@ -474,6 +474,52 @@ class AppTests(unittest.TestCase):
         )
         self.assertEqual(2, get_nr_of_shares_in_db_file(self.db_file))
 
+    def test_openport_app__forward_tunnel__exec(self):
+        if self.ws_options:
+            self.skipTest("not supported with websockets")
+
+        port_out = self.osinteraction.get_open_port()
+        p_out = self.start_openport_process("--local-port", port_out)
+        remote_host, remote_port, link = get_remote_host_and_port(
+            p_out, self.osinteraction
+        )
+        self.osinteraction.print_output_continuously_threaded(p_out, "p_out")
+
+        port_file = TEST_FILES_PATH / "tmp" / f"{self._testMethodName}_port.txt"
+        if port_file.exists():
+            os.remove(port_file)
+
+        # The shared flags must come before "exec": everything after it
+        # belongs to the command (so its own flags are left alone).
+        p_in = self.start_openport_process_advanced(
+            self.forward,
+            "--remote-port",
+            str(remote_port),
+            "--server",
+            TEST_SERVER,
+            "--verbose",
+            "--database",
+            str(self.db_file),
+            "exec",
+            f"printf %s $port > {port_file}; sleep 30; exit 4",
+        )
+        self.check_application_is_still_alive(p_out)
+
+        # The command starts once the tunnel is up, with $port substituted.
+        wait_for_response(port_file.exists, timeout=30)
+        local_port = int(port_file.read_text())
+        self.assertGreater(local_port, 0)
+
+        # The tunnel works for the lifetime of the command.
+        self.check_application_is_still_alive(p_in)
+        check_tcp_port_forward(
+            self, remote_host="127.0.0.1", local_port=port_out, remote_port=local_port
+        )
+
+        # The session ends with the command and carries its exit code.
+        run_method_with_timeout(p_in.wait, 60)
+        self.assertEqual(4, p_in.returncode)
+
     def test_double_forward_tunnel_to_same_port(self):
         if self.ws_options:
             self.skipTest("not supported with websockets")
