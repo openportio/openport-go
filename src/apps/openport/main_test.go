@@ -191,6 +191,60 @@ func TestSaveForwardTunnel(t *testing.T) {
 	testutil.CheckTcpForward(t, port, "127.0.0.1", forwardPort)
 }
 
+func TestForwardTunnelExec(t *testing.T) {
+	testutil.FailIfError(t, os.MkdirAll("tmp", 0o755))
+	dbFile := "tmp/TestForwardTunnelExec.db"
+	port := testutil.GetFreePort(t)
+
+	reverseApp := openport.CreateApp()
+	defer reverseApp.Stop(0)
+	go run(reverseApp, []string{
+		OPENPORT_EXE,
+		strconv.Itoa(port),
+		"--server", TEST_SERVER,
+		"--verbose",
+		"--database", dbFile,
+		"--exit-on-failure-timeout", "10",
+	})
+	waitForApp(t, reverseApp)
+
+	// The command writes the substituted $port to a file and exits; the
+	// forward session must exit with it, carrying its exit code.
+	portFile, err := os.CreateTemp("tmp", "TestForwardTunnelExec")
+	testutil.FailIfError(t, err)
+	defer os.Remove(portFile.Name())
+
+	forwardApp := openport.CreateApp()
+	go run(forwardApp, []string{
+		OPENPORT_EXE,
+		"forward",
+		"--server", TEST_SERVER,
+		"--database", dbFile,
+		"--verbose",
+		"--exit-on-failure-timeout", "10",
+		"--remote-port", strconv.Itoa(reverseApp.Session.RemotePort),
+		"exec", fmt.Sprintf("printf %%s $port > %s; exit 3", portFile.Name()),
+	})
+
+	getExitCode := func() string {
+		return strconv.Itoa(<-forwardApp.ExitCode)
+	}
+	assert.Equal(t, "3", testutil.TimeoutFunction(t, getExitCode, 60*time.Second))
+
+	writtenPort, err := os.ReadFile(portFile.Name())
+	testutil.FailIfError(t, err)
+	assert.Equal(t, strconv.Itoa(forwardApp.Session.LocalPort), string(writtenPort))
+	assert.Greater(t, forwardApp.Session.LocalPort, 0)
+
+	// The exec command owns the session: once it exits, the session may not
+	// linger as active.
+	activeSessions, err := forwardApp.DbHandler.GetAllActive()
+	testutil.FailIfError(t, err)
+	for _, session := range activeSessions {
+		assert.False(t, session.ForwardTunnel)
+	}
+}
+
 func TestConnectionTimeout(t *testing.T) {
 	dbFile := "tmp/TestConnectionTimeout.db"
 	err := os.Remove(dbFile)
