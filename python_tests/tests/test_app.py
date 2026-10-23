@@ -69,6 +69,17 @@ KEY_REGISTRATION_TOKEN = os.environ.get("KEY_REGISTRATION_TOKEN")
 KEY_NAME = f"ci-{secrets.token_hex(4)}"
 
 
+def exec_until_stopped(port_file: Path, stop_file: Path, exit_code: int) -> str:
+    """An exec command that writes $port, keeps the tunnel up until the test
+    creates stop_file, then exits with exit_code. Gives up with exit 1 after
+    60s so a test that dies early does not leave the session behind."""
+    return (
+        f"printf %s $port > {port_file}; "
+        f"for i in $(seq 600); do [ -e {stop_file} ] && exit {exit_code}; sleep 0.1; done; "
+        f"exit 1"
+    )
+
+
 if not osinteraction.is_windows():
     PYTHON_EXE = subprocess.getoutput("which python")
     KILL_SIGNAL = signal.SIGKILL
@@ -492,9 +503,7 @@ class AppTests(unittest.TestCase):
         )
         self.osinteraction.print_output_continuously_threaded(p_out, "p_out")
 
-        port_file = TEST_FILES_PATH / "tmp" / f"{self._testMethodName}_port.txt"
-        if port_file.exists():
-            os.remove(port_file)
+        port_file, stop_file = self.exec_handshake_files()
 
         # The shared flags must come before "exec": everything after it
         # belongs to the command (so its own flags are left alone).
@@ -508,7 +517,7 @@ class AppTests(unittest.TestCase):
             "--database",
             str(self.db_file),
             "exec",
-            f"printf %s $port > {port_file}; sleep 30; exit 4",
+            exec_until_stopped(port_file, stop_file, exit_code=4),
         )
         self.check_application_is_still_alive(p_out)
 
@@ -524,8 +533,19 @@ class AppTests(unittest.TestCase):
         )
 
         # The session ends with the command and carries its exit code.
+        stop_file.touch()
         run_method_with_timeout(p_in.wait, 60)
         self.assertEqual(4, p_in.returncode)
+
+    def exec_handshake_files(self):
+        """Files for an exec command that reports its $port and runs until told to stop."""
+        tmp = TEST_FILES_PATH / "tmp"
+        port_file = tmp / f"{self._testMethodName}_port.txt"
+        stop_file = tmp / f"{self._testMethodName}_stop"
+        for f in (port_file, stop_file):
+            if f.exists():
+                os.remove(f)
+        return port_file, stop_file
 
     def skip_unless_connect_by_name_possible(self):
         if self.ws_options:
@@ -562,9 +582,7 @@ class AppTests(unittest.TestCase):
         get_remote_host_and_port(p_out, self.osinteraction)
         self.osinteraction.print_output_continuously_threaded(p_out, "p_out")
 
-        port_file = TEST_FILES_PATH / "tmp" / f"{self._testMethodName}_port.txt"
-        if port_file.exists():
-            os.remove(port_file)
+        port_file, stop_file = self.exec_handshake_files()
 
         # "<name>:<port>" spelling; flags before "exec", the command after.
         p_in = self.start_openport_process_advanced(
@@ -576,13 +594,14 @@ class AppTests(unittest.TestCase):
             "--database",
             str(self.db_file),
             "exec",
-            f"printf %s $port > {port_file}; sleep 20; exit 5",
+            exec_until_stopped(port_file, stop_file, exit_code=5),
         )
         wait_for_response(port_file.exists, timeout=30)
         local_port = int(port_file.read_text())
         check_tcp_port_forward(
             self, remote_host="127.0.0.1", local_port=port_out, remote_port=local_port
         )
+        stop_file.touch()
         run_method_with_timeout(p_in.wait, 60)
         self.assertEqual(5, p_in.returncode)
 
