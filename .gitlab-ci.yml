@@ -137,7 +137,7 @@ govulncheck:
     # requiring a newer Go than the image ships (job 4953). The vuln database
     # is fetched live either way, so pinning the tool loses nothing.
     - >
-      docker run --rm -v "$PWD":/repo -w /repo/src golang:1.26.8-bookworm
+      docker run --rm -v "$PWD":/repo -w /repo/src golang:1.27.3-bookworm
       bash -c "go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 &&
       \$(go env GOPATH)/bin/govulncheck ./...
       | tee /repo/security-reports/govulncheck.txt;

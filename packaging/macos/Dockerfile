@@ -6,7 +6,7 @@
 # guaranteed there, and no downloaded prebuilt binaries).
 #
 # Same base pin as Dockerfile-goreleaser; bump them together.
-FROM golang:1.27.1-bookworm
+FROM golang:1.27.3-bookworm
 
 # genisoimage builds the dmg's filesystem image (-apple hybrid; hfsprogs is
 # not in bookworm), cpio the pkg payload.
