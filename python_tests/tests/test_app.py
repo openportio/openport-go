@@ -543,8 +543,8 @@ class AppTests(unittest.TestCase):
         port_file = tmp / f"{self._testMethodName}_port.txt"
         stop_file = tmp / f"{self._testMethodName}_stop"
         for f in (port_file, stop_file):
-            if f.exists():
-                os.remove(f)
+            f.unlink(missing_ok=True)
+            self.addCleanup(f.unlink, missing_ok=True)
         return port_file, stop_file
 
     def skip_unless_connect_by_name_possible(self):
