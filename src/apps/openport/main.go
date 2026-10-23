@@ -155,6 +155,11 @@ func run(app *o.App, args []string) {
 
 	flagSets["forward"] = forwardTunnelFlagSet
 
+	connectFlagSet := flag.NewFlagSet("connect", flag.ExitOnError)
+	addSharedFlags(connectFlagSet)
+	connectFlagSet.IntVar(&port, "local-port", -1, "The remote port will be available at localhost:<local-port>")
+	flagSets["connect"] = connectFlagSet
+
 	versionFlagSet := flag.NewFlagSet("version", flag.ExitOnError)
 	addHelpFlag(versionFlagSet)
 	addVerboseFlag(versionFlagSet)
@@ -212,7 +217,107 @@ func run(app *o.App, args []string) {
 		return
 	}
 
+	// Shared by "connect" and "ssh": a forward tunnel to one of your own
+	// devices, resolved by its name (set with "openport register --name"),
+	// optionally running a command once the tunnel is up.
+	startConnectSession := func(device string, remoteLocalPort int, execCommand []string) {
+		o.InitLogging(verbose, o.LogPath)
+		app.ExitOnFailureTimeout = exitOnFailureTimeout
+		if len(execCommand) > 0 {
+			if restartOnReboot {
+				log.Fatal("--restart-on-reboot cannot be combined with an exec command")
+			}
+			if daemonize {
+				log.Fatal("--daemonize cannot be combined with an exec command")
+			}
+			app.SetExecCommand(execCommand)
+		}
+		if daemonize {
+			app.StartDaemon(args)
+			return
+		}
+		app.Session = db.Session{
+			LocalPort:          port,
+			Server:             server,
+			KeepAliveSeconds:   keepAliveSeconds,
+			Proxy:              socksProxy,
+			Active:             true,
+			ForwardTunnel:      true,
+			RemotePort:         -1,
+			ForwardToKeyName:   device,
+			ForwardToLocalPort: remoteLocalPort,
+			SshServer:          sshServer,
+			AutomaticRestart:   automaticRestart,
+		}
+		managementPort := app.StartControlServer(controlPort)
+		app.Session.AppManagementPort = managementPort
+		if restartOnReboot {
+			app.Session.RestartCommand = strings.Join(stripAutomaticRestart(args[1:]), " ")
+		}
+		app.InitFiles()
+		app.CreateTunnel()
+		app.Stop(0)
+	}
+
 	switch args[1] {
+
+	case "connect":
+		// Everything after "exec" belongs to the command, so its own flags
+		// must not reach the openport flag parser.
+		rest := args[2:]
+		var execCommand []string
+		for i, arg := range rest {
+			if arg == "exec" {
+				execCommand = rest[i+1:]
+				rest = rest[:i]
+				break
+			}
+		}
+		_ = connectFlagSet.Parse(rest)
+		app.DbHandler.SetPath(dbPath)
+		if help {
+			println("Use this command to reach a port of another device of yours, by the device's name.")
+			println("The other device must be online (\"openport <port>\") and registered to your")
+			println("account with a name: openport register <token> --name <device-name> .")
+			println("Usage: openport connect <device-name> <port> [arguments] [exec <command>]")
+			println("       openport connect <device-name>:<port> [arguments] [exec <command>]")
+			println("In the exec command, $port is replaced by the local port of the tunnel (single-quote")
+			println("it so your shell does not expand it first).")
+			println("Example: openport connect device-a 22 exec 'ssh root@localhost -p $port'")
+			connectFlagSet.PrintDefaults()
+			app.Stop(o.EXIT_CODE_HELP)
+			return
+		}
+		device, remoteLocalPort, err := parseConnectTarget(connectFlagSet.Args())
+		if err != nil {
+			log.Error(err)
+			println("Usage: openport connect <device-name> <port> [arguments] [exec <command>]")
+			app.Stop(o.EXIT_CODE_INVALID_ARGUMENT)
+			return
+		}
+		startConnectSession(device, remoteLocalPort, execCommand)
+
+	case "ssh":
+		opFlags, sshOptions, destination, remoteCommand := splitSSHArgs(args[2:], connectFlagSet)
+		_ = connectFlagSet.Parse(opFlags)
+		app.DbHandler.SetPath(dbPath)
+		if help || destination == "" {
+			println("Use this command to ssh into another device of yours, by the device's name.")
+			println("The other device must run an ssh server, expose it (\"openport 22\") and be")
+			println("registered to your account with a name: openport register <token> --name <device-name> .")
+			println("Usage: openport ssh [arguments] [ssh-options] [user@]<device-name> [command]")
+			println("Example: openport ssh root@device-a")
+			connectFlagSet.PrintDefaults()
+			if help {
+				app.Stop(o.EXIT_CODE_HELP)
+			} else {
+				app.Stop(o.EXIT_CODE_INVALID_ARGUMENT)
+			}
+			return
+		}
+		sshUser, device := splitUserDevice(destination)
+		execCommand := buildSSHCommand(sshUser, device, sshOptions, remoteCommand)
+		startConnectSession(device, 22, execCommand)
 
 	case "register-key", "register", "link":
 		_ = registerKeyFlagSet.Parse(args[2:])
@@ -410,13 +515,26 @@ func run(app *o.App, args []string) {
 		forwardTunnel := args[1] == "forward"
 		var remotePortInt int
 		var err error
+		var execCommand []string
 		if forwardTunnel {
-			_ = defaultFlagSet.Parse(args[2:])
+			// Everything after "exec" belongs to the command, so its own
+			// flags must not reach the openport flag parser.
+			forwardArgs := args[2:]
+			for i, arg := range forwardArgs {
+				if arg == "exec" {
+					execCommand = forwardArgs[i+1:]
+					forwardArgs = forwardArgs[:i]
+					break
+				}
+			}
+			_ = defaultFlagSet.Parse(forwardArgs)
 			app.DbHandler.SetPath(dbPath)
 			if help {
 				println("Use this command to expose the port of your peer on a local port on your machine.")
 				println("See https://openport.readthedocs.io/en/latest/recipes_create_a_forward_tunnel.html for more information.")
-				println("Usage: openport forward --remote-port <server:server_port> [arguments]")
+				println("Usage: openport forward --remote-port <server:server_port> [arguments] [exec <command>]")
+				println("In the exec command, $port is replaced by the local port of the tunnel (single-quote")
+				println("it so your shell does not expand it first).")
 				forwardTunnelFlagSet.PrintDefaults()
 				app.Stop(o.EXIT_CODE_HELP)
 				return
@@ -450,6 +568,8 @@ func run(app *o.App, args []string) {
 				println("Commands:")
 				println("  <port>                Expose a local port to the internet.")
 				println("  forward               Expose a port of your peer to this machine.")
+				println("  connect <name> <port> Reach a port of another device of yours, by name.")
+				println("  ssh [user@]<name>     SSH into another device of yours, by name.")
 				println("  list                  List all sessions.")
 				println("  kill <local_port>     Kill a session.")
 				println("  kill-all              Kill all sessions.")
@@ -532,6 +652,16 @@ func run(app *o.App, args []string) {
 		}
 		if *localProxyProtocol && !*localTLS {
 			log.Fatal("--local-proxy-protocol requires --local-tls")
+		}
+
+		if len(execCommand) > 0 {
+			if restartOnReboot {
+				log.Fatal("--restart-on-reboot cannot be combined with an exec command")
+			}
+			if daemonize {
+				log.Fatal("--daemonize cannot be combined with an exec command")
+			}
+			app.SetExecCommand(execCommand)
 		}
 
 		if daemonize {
@@ -658,8 +788,98 @@ func rewriteFlagValue(args []string, flagName, value string) []string {
 	return result
 }
 
+// parseConnectTarget extracts the device name and that device's local port
+// from the positional arguments of "openport connect": either two arguments
+// ("device-a 22") or one joined with a colon ("device-a:22").
+func parseConnectTarget(tail []string) (string, int, error) {
+	var device, portString string
+	switch len(tail) {
+	case 1:
+		colon := strings.LastIndex(tail[0], ":")
+		if colon < 0 {
+			return "", 0, fmt.Errorf("missing the port to connect to on '%s'", tail[0])
+		}
+		device, portString = tail[0][:colon], tail[0][colon+1:]
+	case 2:
+		device, portString = tail[0], tail[1]
+	default:
+		return "", 0, fmt.Errorf("expected <device-name> <port>, got: %s", strings.Join(tail, " "))
+	}
+	port, err := strconv.Atoi(portString)
+	if err != nil || port < 1 || port > 65535 {
+		return "", 0, fmt.Errorf("invalid port: %s", portString)
+	}
+	if device == "" {
+		return "", 0, fmt.Errorf("missing device name")
+	}
+	return device, port, nil
+}
+
+// The OpenSSH options that take a value, from ssh's getopt string. An ssh
+// option before the destination must be kept out of the destination search,
+// together with its value ("-i key.pem").
+const sshOptionsWithValue = "BbceilmopDEFIJLOQRSWw"
+
+// splitSSHArgs separates the arguments of "openport ssh" into openport's own
+// flags (--long form, before the destination), ssh options (-short form,
+// before the destination), the destination, and the remote command (all that
+// follows the destination).
+func splitSSHArgs(args []string, opFlagSet *flag.FlagSet) (opFlags []string, sshOptions []string, destination string, remoteCommand []string) {
+	i := 0
+	for i < len(args) {
+		arg := args[i]
+		switch {
+		case strings.HasPrefix(arg, "--"):
+			opFlags = append(opFlags, arg)
+			name, _, hasValue := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
+			f := opFlagSet.Lookup(name)
+			if !hasValue && f != nil && f.Value.Type() != "bool" && i+1 < len(args) {
+				i++
+				opFlags = append(opFlags, args[i])
+			}
+		case strings.HasPrefix(arg, "-") && len(arg) > 1:
+			sshOptions = append(sshOptions, arg)
+			if len(arg) == 2 && strings.ContainsAny(arg[1:], sshOptionsWithValue) && i+1 < len(args) {
+				i++
+				sshOptions = append(sshOptions, args[i])
+			}
+		default:
+			destination = arg
+			remoteCommand = args[i+1:]
+			return
+		}
+		i++
+	}
+	return
+}
+
+// splitUserDevice splits "root@device-a" into user and device name. Like ssh,
+// the part before the last "@" is the user, so a user containing "@" still
+// works; no "@" means no user (ssh falls back to the local username).
+func splitUserDevice(destination string) (string, string) {
+	at := strings.LastIndex(destination, "@")
+	if at < 0 {
+		return "", destination
+	}
+	return destination[:at], destination[at+1:]
+}
+
+// buildSSHCommand assembles the ssh invocation for "openport ssh". The tunnel
+// ends on 127.0.0.1 at an ephemeral port, so HostKeyAlias pins the known_hosts
+// entry to the device name instead: the host key stays verified across ports,
+// and a different machine answering to the same name is flagged.
+func buildSSHCommand(sshUser string, device string, sshOptions []string, remoteCommand []string) []string {
+	command := []string{"ssh", "-p", "$port", "-o", "HostKeyAlias=openport-" + device}
+	if sshUser != "" {
+		command = append(command, "-l", sshUser)
+	}
+	command = append(command, sshOptions...)
+	command = append(command, "127.0.0.1")
+	return append(command, remoteCommand...)
+}
+
 func myUsage() {
-	fmt.Printf("Usage: %s (<port> | forward | list | restart-sessions | kill <port> | kill-all | register <token> | rotate-key <token> | rm <port> | version) [arguments]\n", os.Args[0])
+	fmt.Printf("Usage: %s (<port> | forward | connect | ssh | list | restart-sessions | kill <port> | kill-all | register <token> | rotate-key <token> | rm <port> | version) [arguments]\n", os.Args[0])
 	fmt.Println("Type 'openport <command> --help' for more information about the different commands.")
 	fmt.Println("Default: openport <port> [arguments]")
 }

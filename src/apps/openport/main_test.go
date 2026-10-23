@@ -17,6 +17,16 @@ const TEST_SERVER = "https://test.openport.io"
 
 var OPENPORT_EXE = testutil.DefaultEnv("OPENPORT_EXE", "/home/jan/workspace/openport-go-client/openport-amd64")
 
+// TestMain creates the tmp dir the tests keep their databases in. It is
+// gitignored, so a fresh checkout does not have it, and sqlite does not
+// create missing directories.
+func TestMain(m *testing.M) {
+	if err := os.MkdirAll("tmp", 0o755); err != nil {
+		panic(err)
+	}
+	os.Exit(m.Run())
+}
+
 func TestReverseTunnel(t *testing.T) {
 	dbFile := "tmp/TestReverseTunnel.db"
 	port := testutil.GetFreePort(t)
@@ -189,6 +199,59 @@ func TestSaveForwardTunnel(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	testutil.CheckTcpForward(t, port, "127.0.0.1", forwardPort)
+}
+
+func TestForwardTunnelExec(t *testing.T) {
+	dbFile := "tmp/TestForwardTunnelExec.db"
+	port := testutil.GetFreePort(t)
+
+	reverseApp := openport.CreateApp()
+	defer reverseApp.Stop(0)
+	go run(reverseApp, []string{
+		OPENPORT_EXE,
+		strconv.Itoa(port),
+		"--server", TEST_SERVER,
+		"--verbose",
+		"--database", dbFile,
+		"--exit-on-failure-timeout", "10",
+	})
+	waitForApp(t, reverseApp)
+
+	// The command writes the substituted $port to a file and exits; the
+	// forward session must exit with it, carrying its exit code.
+	portFile, err := os.CreateTemp("tmp", "TestForwardTunnelExec")
+	testutil.FailIfError(t, err)
+	defer os.Remove(portFile.Name())
+
+	forwardApp := openport.CreateApp()
+	go run(forwardApp, []string{
+		OPENPORT_EXE,
+		"forward",
+		"--server", TEST_SERVER,
+		"--database", dbFile,
+		"--verbose",
+		"--exit-on-failure-timeout", "10",
+		"--remote-port", strconv.Itoa(reverseApp.Session.RemotePort),
+		"exec", fmt.Sprintf("printf %%s $port > %s; exit 3", portFile.Name()),
+	})
+
+	getExitCode := func() string {
+		return strconv.Itoa(<-forwardApp.ExitCode)
+	}
+	assert.Equal(t, "3", testutil.TimeoutFunction(t, getExitCode, 60*time.Second))
+
+	writtenPort, err := os.ReadFile(portFile.Name())
+	testutil.FailIfError(t, err)
+	assert.Equal(t, strconv.Itoa(forwardApp.Session.LocalPort), string(writtenPort))
+	assert.Greater(t, forwardApp.Session.LocalPort, 0)
+
+	// The exec command owns the session: once it exits, the session may not
+	// linger as active.
+	activeSessions, err := forwardApp.DbHandler.GetAllActive()
+	testutil.FailIfError(t, err)
+	for _, session := range activeSessions {
+		assert.False(t, session.ForwardTunnel)
+	}
 }
 
 func TestConnectionTimeout(t *testing.T) {

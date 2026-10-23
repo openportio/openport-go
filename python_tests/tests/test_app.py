@@ -1,5 +1,6 @@
 import logging
 import os
+import secrets
 import shutil
 import signal
 import socket
@@ -62,6 +63,21 @@ TEST_SERVER = "https://test.openport.io"
 TEST_SERVERS = ["test.openport.io", "test2.openport.io"]
 
 KEY_REGISTRATION_TOKEN = os.environ.get("KEY_REGISTRATION_TOKEN")
+# Every test run registers its own key into the same test account, and
+# "openport connect <name>" refuses a name that more than one key carries, so
+# the name has to be unique per run.
+KEY_NAME = f"ci-{secrets.token_hex(4)}"
+
+
+def exec_until_stopped(port_file: Path, stop_file: Path, exit_code: int) -> str:
+    """An exec command that writes $port, keeps the tunnel up until the test
+    creates stop_file, then exits with exit_code. Gives up with exit 1 after
+    60s so a test that dies early does not leave the session behind."""
+    return (
+        f"printf %s $port > {port_file}; "
+        f"for i in $(seq 600); do [ -e {stop_file} ] && exit {exit_code}; sleep 0.1; done; "
+        f"exit 1"
+    )
 
 
 if not osinteraction.is_windows():
@@ -106,6 +122,8 @@ class AppTests(unittest.TestCase):
                 + [
                     "register-key",
                     KEY_REGISTRATION_TOKEN,
+                    "--name",
+                    KEY_NAME,
                     "--server",
                     TEST_SERVER,
                     "--verbose",
@@ -473,6 +491,128 @@ class AppTests(unittest.TestCase):
             self, remote_host="127.0.0.1", local_port=port_out, remote_port=port_in
         )
         self.assertEqual(2, get_nr_of_shares_in_db_file(self.db_file))
+
+    def test_openport_app__forward_tunnel__exec(self):
+        if self.ws_options:
+            self.skipTest("not supported with websockets")
+
+        port_out = self.osinteraction.get_open_port()
+        p_out = self.start_openport_process("--local-port", port_out)
+        remote_host, remote_port, link = get_remote_host_and_port(
+            p_out, self.osinteraction
+        )
+        self.osinteraction.print_output_continuously_threaded(p_out, "p_out")
+
+        port_file, stop_file = self.exec_handshake_files()
+
+        # The shared flags must come before "exec": everything after it
+        # belongs to the command (so its own flags are left alone).
+        p_in = self.start_openport_process_advanced(
+            self.forward,
+            "--remote-port",
+            str(remote_port),
+            "--server",
+            TEST_SERVER,
+            "--verbose",
+            "--database",
+            str(self.db_file),
+            "exec",
+            exec_until_stopped(port_file, stop_file, exit_code=4),
+        )
+        self.check_application_is_still_alive(p_out)
+
+        # The command starts once the tunnel is up, with $port substituted.
+        wait_for_response(port_file.exists, timeout=30)
+        local_port = int(port_file.read_text())
+        self.assertGreater(local_port, 0)
+
+        # The tunnel works for the lifetime of the command.
+        self.check_application_is_still_alive(p_in)
+        check_tcp_port_forward(
+            self, remote_host="127.0.0.1", local_port=port_out, remote_port=local_port
+        )
+
+        # The session ends with the command and carries its exit code.
+        stop_file.touch()
+        run_method_with_timeout(p_in.wait, 60)
+        self.assertEqual(4, p_in.returncode)
+
+    def exec_handshake_files(self):
+        """Files for an exec command that reports its $port and runs until told to stop."""
+        tmp = TEST_FILES_PATH / "tmp"
+        port_file = tmp / f"{self._testMethodName}_port.txt"
+        stop_file = tmp / f"{self._testMethodName}_stop"
+        for f in (port_file, stop_file):
+            f.unlink(missing_ok=True)
+            self.addCleanup(f.unlink, missing_ok=True)
+        return port_file, stop_file
+
+    def skip_unless_connect_by_name_possible(self):
+        if self.ws_options:
+            self.skipTest("not supported with websockets")
+        if not KEY_REGISTRATION_TOKEN:
+            self.skipTest("connecting by name needs the key registered with a name")
+
+    def test_openport_app__connect_by_name(self):
+        self.skip_unless_connect_by_name_possible()
+
+        port_out = self.osinteraction.get_open_port()
+        p_out = self.start_openport_process("--local-port", port_out)
+        get_remote_host_and_port(p_out, self.osinteraction)
+        self.osinteraction.print_output_continuously_threaded(p_out, "p_out")
+
+        port_in = self.osinteraction.get_open_port()
+        p_in = self.start_openport_process(
+            "connect", KEY_NAME, port_out, "--local-port", port_in
+        )
+        self.check_application_is_still_alive(p_out)
+        _, local_port, _ = get_remote_host_and_port(
+            p_in, self.osinteraction, forward_tunnel=True
+        )
+        self.assertEqual(port_in, local_port)
+        check_tcp_port_forward(
+            self, remote_host="127.0.0.1", local_port=port_out, remote_port=port_in
+        )
+
+    def test_openport_app__connect_by_name__exec(self):
+        self.skip_unless_connect_by_name_possible()
+
+        port_out = self.osinteraction.get_open_port()
+        p_out = self.start_openport_process("--local-port", port_out)
+        get_remote_host_and_port(p_out, self.osinteraction)
+        self.osinteraction.print_output_continuously_threaded(p_out, "p_out")
+
+        port_file, stop_file = self.exec_handshake_files()
+
+        # "<name>:<port>" spelling; flags before "exec", the command after.
+        p_in = self.start_openport_process_advanced(
+            "connect",
+            f"{KEY_NAME}:{port_out}",
+            "--server",
+            TEST_SERVER,
+            "--verbose",
+            "--database",
+            str(self.db_file),
+            "exec",
+            exec_until_stopped(port_file, stop_file, exit_code=5),
+        )
+        wait_for_response(port_file.exists, timeout=30)
+        local_port = int(port_file.read_text())
+        check_tcp_port_forward(
+            self, remote_host="127.0.0.1", local_port=port_out, remote_port=local_port
+        )
+        stop_file.touch()
+        run_method_with_timeout(p_in.wait, 60)
+        self.assertEqual(5, p_in.returncode)
+
+    def test_openport_app__connect_by_name__unknown_name(self):
+        self.skip_unless_connect_by_name_possible()
+
+        p = self.start_openport_process("connect", f"{KEY_NAME}-unknown", 22)
+        out, err = run_method_with_timeout(p.communicate, 60)
+        output = (out + err).decode("utf-8", errors="replace")
+        self.assertEqual(9, p.returncode, output)  # EXIT_CODE_FATAL_SESSION_ERROR
+        self.assertIn(f"No online client named '{KEY_NAME}-unknown'", output)
 
     def test_double_forward_tunnel_to_same_port(self):
         if self.ws_options:

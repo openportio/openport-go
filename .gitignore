@@ -31,6 +31,7 @@ openportw-*
 !src/database/testdata/openport-*.db
 test.db
 src/tmp/
+src/apps/openport/tmp/
 test-results/
 
 *.pyc
@@ -56,3 +57,10 @@ packaging/build/
 # Local environment files -- never commit (this repo is public); commit a
 # matching .env.example instead.
 .env
+
+# Droppings of local docker-compose test runs (HOME=src inside the container)
+src/.cache/
+src/.config/
+src/test-files/tmp/
+*-no-ports.yaml
+src/vendor/

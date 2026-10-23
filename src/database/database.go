@@ -53,6 +53,13 @@ type Session struct {
 	Proxy            string
 	ForwardTunnel    bool `sql:"default:false"`
 
+	// Forward tunnel resolved by device name instead of by server port
+	// ("openport connect <name> <port>"). Persisted so every reconnect
+	// re-resolves the name: if the remote device reconnects and lands on a
+	// different server port, the tunnel follows it.
+	ForwardToKeyName   string
+	ForwardToLocalPort int
+
 	// HostKey is the SSH server's expected public host key, in authorized_keys
 	// format, as published by the API. Persisted so that a session restarted
 	// from the database still has something to verify against before it has
@@ -110,6 +117,25 @@ func (dbHandler *DBHandler) InitDB() {
 	}
 }
 
+// GetNamedForwardSession finds the session row of a previous
+// "openport connect <name> <port>", keyed by what the user asked for rather
+// than the resolved server port, which may change between runs.
+func (dbHandler *DBHandler) GetNamedForwardSession(keyName string, forwardToLocalPort int) (Session, error) {
+	db, err := gorm.Open("sqlite3", dbHandler.DbPath)
+	if err != nil {
+		panic("failed to connect database")
+	}
+	defer db.Close()
+
+	var session Session
+	db.First(&session, "forward_to_key_name = ? and forward_to_local_port = ? and forward_tunnel = 1",
+		keyName, forwardToLocalPort)
+	if db.Error != nil {
+		return session, db.Error
+	}
+	return session, nil
+}
+
 func (dbHandler *DBHandler) GetForwardSession(remotePort int, sshServer string) (Session, error) {
 	db, err := gorm.Open("sqlite3", dbHandler.DbPath)
 	if err != nil {
@@ -154,7 +180,9 @@ func (dbHandler *DBHandler) Save(session *Session) error {
 	defer db.Close()
 
 	var existingSession Session
-	if session.ForwardTunnel {
+	if session.ForwardTunnel && session.ForwardToKeyName != "" {
+		existingSession, err = dbHandler.GetNamedForwardSession(session.ForwardToKeyName, session.ForwardToLocalPort)
+	} else if session.ForwardTunnel {
 		existingSession, err = dbHandler.GetForwardSession(session.RemotePort, session.SshServer)
 	} else {
 		existingSession, err = dbHandler.GetSession(session.LocalPort)
@@ -208,7 +236,13 @@ func (dbHandler *DBHandler) GetSessionsToRestart() ([]Session, error) {
 func (dbHandler *DBHandler) EnrichSessionWithHistory(session *Session) Session {
 	if session.ForwardTunnel {
 		if session.LocalPort < 0 {
-			dbSession, err := dbHandler.GetForwardSession(session.RemotePort, session.SshServer)
+			var dbSession Session
+			var err error
+			if session.ForwardToKeyName != "" {
+				dbSession, err = dbHandler.GetNamedForwardSession(session.ForwardToKeyName, session.ForwardToLocalPort)
+			} else {
+				dbSession, err = dbHandler.GetForwardSession(session.RemotePort, session.SshServer)
+			}
 			if err != nil {
 				log.Errorf("error fetching session %s", err)
 			} else {

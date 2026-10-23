@@ -58,6 +58,10 @@ type App struct {
 	Connected            chan bool
 	ConnectedState       ConnectionState
 
+	// Set for "openport connect ... exec <command>" and "openport ssh":
+	// the command to run once the tunnel is up. See exec.go.
+	Exec *execHandler
+
 	// Zero value for the common non-passthrough sessions; only carries
 	// state when --tls-passthrough is used. See custom_domain.go.
 	passthrough tlsPassthroughHandler
@@ -194,6 +198,10 @@ func Find(a []string, x string) int {
 }
 
 func HandleSignals(app *App) {
+	if app.Exec != nil {
+		handleExecSignals(app)
+		return
+	}
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT)
 	restartMessage := ""

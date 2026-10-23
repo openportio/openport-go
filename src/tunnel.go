@@ -370,6 +370,7 @@ func (app *App) StartForwardTunnel(key ssh.Signer, session db.Session, msg strin
 
 	log.Info(msg)
 	app.MarkConnected()
+	app.StartExecOnce()
 	for {
 		conn, err := listener.Accept()
 		if err != nil {

@@ -205,17 +205,29 @@ func (app *App) RequestPortForward(session *db.Session, publicKey []byte) (PortR
 	httpClient := GetHttpClient(session.Proxy)
 
 	postUrl := fmt.Sprintf("%s/api/v1/request-port", session.Server)
+	requestPort := session.RemotePort
+	requestServer := session.SshServer
+	if session.ForwardToKeyName != "" {
+		// Resolving by name: never pin the server or port from a previous
+		// response, so a reconnect follows the device if it moved.
+		requestPort = -1
+		requestServer = ""
+	}
 	getParameters := url.Values{
 		"public_key":            {string(publicKey)},
-		"request_port":          {strconv.Itoa(session.RemotePort)},
+		"request_port":          {strconv.Itoa(requestPort)},
 		"client_version":        {VERSION},
 		"restart_session_token": {session.SessionToken},
 		"local_port":            {strconv.Itoa(session.LocalPort)},
 		"http_forward":          {strconv.FormatBool(session.HttpForward)},
 		"platform":              {runtime.GOOS},
 		"forward_tunnel":        {strconv.FormatBool(session.ForwardTunnel)},
-		"request_server":        {session.SshServer},
+		"request_server":        {requestServer},
 		"automatic_restart":     {strconv.FormatBool(session.AutomaticRestart)},
+	}
+	if session.ForwardToKeyName != "" {
+		getParameters["forward_to_key_name"] = []string{session.ForwardToKeyName}
+		getParameters["forward_to_local_port"] = []string{strconv.Itoa(session.ForwardToLocalPort)}
 	}
 	if session.TlsPassthrough {
 		getParameters["tls_passthrough"] = []string{"true"}
