@@ -2,6 +2,14 @@
 set -ex
 cd "$(dirname $0)" || exit
 
+# Which suite(s) to run: go, python or all (default). CI runs go and python as
+# separate jobs.
+SUITE="${1:-all}"
+case "$SUITE" in
+  go|python|all) ;;
+  *) echo "usage: $0 [go|python|all]" >&2; exit 2 ;;
+esac
+
 if [ -z "$UID" ]; then
   UID=$(id -u)
 fi
@@ -16,12 +24,15 @@ rm -rf test-results/*
 PROJECT_NAME="${PROJECT_NAME:-$(openssl rand -hex 6)}"
 
 #GO tests
-yq 'del(.services[].ports)' docker-compose.yaml > docker-compose-no-ports.yaml
-COMPOSE_ARGS="-f docker-compose-no-ports.yaml -p $PROJECT_NAME"
-rc=0
-docker compose $COMPOSE_ARGS up --build --abort-on-container-exit --exit-code-from client_tests || rc=$?
-docker compose $COMPOSE_ARGS down --remove-orphans
-if [ "$rc" -ne 0 ]; then exit "$rc"; fi
+if [ "$SUITE" != python ]; then
+  yq 'del(.services[].ports)' docker-compose.yaml > docker-compose-no-ports.yaml
+  COMPOSE_ARGS="-f docker-compose-no-ports.yaml -p $PROJECT_NAME"
+  rc=0
+  docker compose $COMPOSE_ARGS up --build --abort-on-container-exit --exit-code-from client_tests || rc=$?
+  docker compose $COMPOSE_ARGS down --remove-orphans
+  if [ "$rc" -ne 0 ]; then exit "$rc"; fi
+fi
+if [ "$SUITE" = go ]; then exit 0; fi
 
 # Python tests
 ./docker_compile.sh
