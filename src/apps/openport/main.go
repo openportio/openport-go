@@ -298,7 +298,7 @@ func run(app *o.App, args []string) {
 		startConnectSession(device, remoteLocalPort, execCommand)
 
 	case "ssh":
-		opFlags, sshOptions, destination, remoteCommand := splitSSHArgs(args[2:], connectFlagSet)
+		opFlags, sshOptions, destination, remoteCommand, devicePort := splitSSHArgs(args[2:], connectFlagSet)
 		_ = connectFlagSet.Parse(opFlags)
 		app.DbHandler.SetPath(dbPath)
 		if help || destination == "" {
@@ -306,6 +306,7 @@ func run(app *o.App, args []string) {
 			println("The other device must run an ssh server, expose it (\"openport 22\") and be")
 			println("registered to your account with a name: openport register <token> --name <device-name> .")
 			println("Usage: openport ssh [arguments] [ssh-options] [user@]<device-name> [command]")
+			println("-p <port> is the port of the ssh server on the device (default 22).")
 			println("Example: openport ssh root@device-a")
 			connectFlagSet.PrintDefaults()
 			if help {
@@ -315,9 +316,19 @@ func run(app *o.App, args []string) {
 			}
 			return
 		}
+		remoteLocalPort := 22
+		if devicePort != "" {
+			var err error
+			remoteLocalPort, err = strconv.Atoi(devicePort)
+			if err != nil || remoteLocalPort < 1 || remoteLocalPort > 65535 {
+				log.Errorf("invalid port: %s", devicePort)
+				app.Stop(o.EXIT_CODE_INVALID_ARGUMENT)
+				return
+			}
+		}
 		sshUser, device := splitUserDevice(destination)
-		execCommand := buildSSHCommand(sshUser, device, sshOptions, remoteCommand)
-		startConnectSession(device, 22, execCommand)
+		execCommand := buildSSHCommand(sshUser, device, remoteLocalPort, sshOptions, remoteCommand)
+		startConnectSession(device, remoteLocalPort, execCommand)
 
 	case "register-key", "register", "link":
 		_ = registerKeyFlagSet.Parse(args[2:])
@@ -823,8 +834,11 @@ const sshOptionsWithValue = "BbceilmopDEFIJLOQRSWw"
 // splitSSHArgs separates the arguments of "openport ssh" into openport's own
 // flags (--long form, before the destination), ssh options (-short form,
 // before the destination), the destination, and the remote command (all that
-// follows the destination).
-func splitSSHArgs(args []string, opFlagSet *flag.FlagSet) (opFlags []string, sshOptions []string, destination string, remoteCommand []string) {
+// follows the destination). Short options follow getopt: they can be grouped
+// ("-Ai key.pem"), and a value can be attached ("-p2222"). "-p" is taken out
+// of the ssh options: ssh always dials the tunnel, so it is the port of the
+// ssh server on the device instead (0 when not given).
+func splitSSHArgs(args []string, opFlagSet *flag.FlagSet) (opFlags []string, sshOptions []string, destination string, remoteCommand []string, devicePort string) {
 	i := 0
 	for i < len(args) {
 		arg := args[i]
@@ -838,10 +852,29 @@ func splitSSHArgs(args []string, opFlagSet *flag.FlagSet) (opFlags []string, ssh
 				opFlags = append(opFlags, args[i])
 			}
 		case strings.HasPrefix(arg, "-") && len(arg) > 1:
-			sshOptions = append(sshOptions, arg)
-			if len(arg) == 2 && strings.ContainsAny(arg[1:], sshOptionsWithValue) && i+1 < len(args) {
-				i++
-				sshOptions = append(sshOptions, args[i])
+			flags := arg[1:]
+			for j := 0; j < len(flags); j++ {
+				if !strings.ContainsRune(sshOptionsWithValue, rune(flags[j])) {
+					continue
+				}
+				option, value := flags[:j+1], flags[j+1:]
+				if value == "" && i+1 < len(args) {
+					i++
+					value = args[i]
+				}
+				if flags[j] == 'p' {
+					devicePort = value
+					if j > 0 {
+						sshOptions = append(sshOptions, "-"+flags[:j])
+					}
+				} else {
+					sshOptions = append(sshOptions, "-"+option, value)
+				}
+				flags = ""
+				break
+			}
+			if flags != "" {
+				sshOptions = append(sshOptions, arg)
 			}
 		default:
 			destination = arg
@@ -867,9 +900,14 @@ func splitUserDevice(destination string) (string, string) {
 // buildSSHCommand assembles the ssh invocation for "openport ssh". The tunnel
 // ends on 127.0.0.1 at an ephemeral port, so HostKeyAlias pins the known_hosts
 // entry to the device name instead: the host key stays verified across ports,
-// and a different machine answering to the same name is flagged.
-func buildSSHCommand(sshUser string, device string, sshOptions []string, remoteCommand []string) []string {
-	command := []string{"ssh", "-p", "$port", "-o", "HostKeyAlias=openport-" + device}
+// and a different machine answering to the same name is flagged. Like ssh's
+// own "[host]:port" entries, a non-default device port gets its own entry.
+func buildSSHCommand(sshUser string, device string, devicePort int, sshOptions []string, remoteCommand []string) []string {
+	hostKeyAlias := "openport-" + device
+	if devicePort != 22 {
+		hostKeyAlias = fmt.Sprintf("%s:%d", hostKeyAlias, devicePort)
+	}
+	command := []string{"ssh", "-p", "$port", "-o", "HostKeyAlias=" + hostKeyAlias}
 	if sshUser != "" {
 		command = append(command, "-l", sshUser)
 	}
