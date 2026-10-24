@@ -29,7 +29,10 @@ workflow:
       when: never
     - when: always
 
-test:
+# Go and python suites run as separate jobs (go_tests / python_tests below) so
+# each gets its own status, log and test report, and a Go failure no longer
+# hides the python results.
+.test_base:
   stage: test
   tags:
     - shell
@@ -49,15 +52,13 @@ test:
     # job -- routine now that the pipeline is interruptible -- leaks a
     # running compose stack with live tunnels that no later cleanup touches:
     # docker system prune only removes *stopped* containers.
-    PROJECT_NAME: "op-ci-$CI_PIPELINE_ID"
+    PROJECT_NAME: "op-ci-$CI_PIPELINE_ID-$CI_JOB_NAME"
   before_script:
     - rm -rf test-results
     - mkdir -p test-results
-  script:
-    - ./run_tests.sh
   after_script:
-    # GitLab runs after_script on cancel as well: take down whichever compose
-    # stack (Go or Python tests, same project name) was still running.
+    # GitLab runs after_script on cancel as well: take down this job's compose
+    # stack if it was still running.
     - docker compose -p "$PROJECT_NAME" down --remove-orphans || true
     # Containers write reports and .pyc caches as root into the bind-mounted
     # source tree. Chown back so the next job's git clean -fdx succeeds.
@@ -72,6 +73,16 @@ test:
     reports:
       junit: test-results/*.xml
     expire_in: 1 week
+
+go_tests:
+  extends: .test_base
+  script:
+    - ./run_tests.sh go
+
+python_tests:
+  extends: .test_base
+  script:
+    - ./run_tests.sh python
 
 # ---------------------------------------------------------------------------
 # Security scanning (EU Cyber Resilience Act, Annex I Part II)
