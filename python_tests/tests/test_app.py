@@ -605,6 +605,33 @@ class AppTests(unittest.TestCase):
         run_method_with_timeout(p_in.wait, 60)
         self.assertEqual(5, p_in.returncode)
 
+    def test_openport_app__connect_by_name__kill(self):
+        # "openport list" shows the connect session under its local port, so
+        # "openport kill <that port>" must stop it, and only it.
+        self.skip_unless_connect_by_name_possible()
+
+        port_out = self.osinteraction.get_open_port()
+        p_out = self.start_openport_process("--local-port", port_out)
+        get_remote_host_and_port(p_out, self.osinteraction)
+        self.osinteraction.print_output_continuously_threaded(p_out, "p_out")
+
+        port_in = self.osinteraction.get_open_port()
+        p_in = self.start_openport_process(
+            "connect", KEY_NAME, port_out, "--local-port", port_in
+        )
+        get_remote_host_and_port(p_in, self.osinteraction, forward_tunnel=True)
+        self.osinteraction.print_output_continuously_threaded(p_in, "p_in")
+
+        p_kill = self.start_openport_process_advanced(
+            self.kill, port_in, "--database", self.db_file, "--verbose"
+        )
+        self.osinteraction.print_output_continuously_threaded(p_kill, "p_kill")
+        run_method_with_timeout(p_kill.wait, 10)
+        self.assertEqual(0, p_kill.returncode)
+        run_method_with_timeout(p_in.wait, 10)
+        self.assertFalse(application_is_alive(p_in))
+        self.check_application_is_still_alive(p_out)
+
     def test_openport_app__connect_by_name__unknown_name(self):
         self.skip_unless_connect_by_name_possible()
 
