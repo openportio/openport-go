@@ -103,13 +103,23 @@ func (app *App) runExecCommand() {
 // handleExecSignals replaces the default SIGINT handling while a command is
 // attached. Ctrl-c belongs to the command (an interactive ssh forwards it to
 // the remote side), so the tunnel must not die on it: the session ends when
-// the command exits. SIGTERM still tears everything down, taking the command
+// the command exits. Until the command has started there is nobody else to
+// handle ctrl-c, so it aborts the session as usual (e.g. while the device is
+// still offline). SIGTERM still tears everything down, taking the command
 // with it.
 func handleExecSignals(app *App) {
 	interrupts := make(chan os.Signal, 1)
 	signal.Notify(interrupts, syscall.SIGINT)
 	go func() {
-		for range interrupts {
+		for sig := range interrupts {
+			app.Exec.mu.Lock()
+			started := app.Exec.cmd != nil
+			app.Exec.mu.Unlock()
+			if !started {
+				log.Infof("Got signal %d. Exiting.", sig)
+				app.Stop(EXIT_CODE_INTERRUPTED)
+				return
+			}
 			// Delivered to the whole foreground process group, so the child
 			// got its own copy; nothing to forward, just don't exit.
 			log.Debug("ignoring SIGINT; the exec command decides when the session ends")
