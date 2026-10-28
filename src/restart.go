@@ -242,6 +242,12 @@ func (app *App) KillSession(port int) {
 		log.Fatal(err2)
 	}
 	if session.ID == 0 {
+		// GetSession only knows the sessions that expose a port. A forward
+		// tunnel ("openport forward/connect") is listed by the local port it
+		// listens on, so "openport kill" must find it by that port too.
+		session = app.activeForwardSessionOnLocalPort(port)
+	}
+	if session.ID == 0 {
 		log.Fatal("Session not found.")
 	}
 	resp, err3 := interProcessHttpClient.Get(fmt.Sprintf("http://127.0.0.1:%d/exit", session.AppManagementPort))
@@ -249,6 +255,19 @@ func (app *App) KillSession(port int) {
 		log.Fatalf("Could not kill session: %s", err3)
 	}
 	log.Debug(resp)
+}
+
+func (app *App) activeForwardSessionOnLocalPort(port int) db.Session {
+	sessions, err := app.DbHandler.GetAllActive()
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, session := range sessions {
+		if session.ForwardTunnel && session.LocalPort == port {
+			return session
+		}
+	}
+	return db.Session{}
 }
 
 func (app *App) RemoveSession(port int) {
