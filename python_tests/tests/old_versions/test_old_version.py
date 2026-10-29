@@ -116,7 +116,8 @@ class OldVersionsTest(TestCase):
     #   2.2.0    2024-01-09  2024-05-21   20.04, 22.04, 24.04
     #   2.2.1    2024-05-21  2024-10-04   20.04, 22.04, 24.04
     #   2.2.2    2024-10-04  2026-02-12   20.04, 22.04, 24.04
-    #   2.2.3    2026-02-12  (current)    22.04, 24.04, 26.04
+    #   2.2.3    2026-02-12  2026-10-02   22.04, 24.04, 26.04
+    #   2.3.0    2026-10-02  (current)    22.04, 24.04, 26.04
     #
     # Keep the tuples in ascending order: several tests use
     # ubuntu_versions[-1] as "the newest OS this version shipped for".
@@ -150,6 +151,9 @@ class OldVersionsTest(TestCase):
         ),
         Version(
             "2.2.3", "--keep-alive 2", 30, 0, ubuntu_versions=("22.04", "24.04", "26.04")
+        ),
+        Version(
+            "2.3.0", "--keep-alive 2", 30, 0, ubuntu_versions=("22.04", "24.04", "26.04")
         ),
     ]
 
